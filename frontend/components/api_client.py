@@ -37,6 +37,56 @@ class APIClient:
             logger.error(f"Error obteniendo info de API: {e}")
             return None
     
+    def get_model_recommendations(self, architecture: str) -> Dict[str, Any]:
+        """Obtiene recomendaciones de configuración para una arquitectura"""
+        try:
+            arch_models = self.get_models_by_architecture(architecture)
+            
+            if not arch_models:
+                return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
+            
+            available_models = [m for m in arch_models["models"] if m["available"]]
+            
+            if not available_models:
+                return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
+            
+            # Calcular tamaños disponibles y escalas máximas
+            input_sizes = sorted(list(set([m["input_size"] for m in available_models])))
+            
+            # Calcular escala máxima posible
+            max_scale = 1
+            for start_size in input_sizes:
+                current_scale = 1
+                current_size = start_size
+                
+                while True:
+                    next_size = current_size * 2
+                    has_model = any(
+                        m["input_size"] == current_size and m["output_size"] == next_size 
+                        for m in available_models
+                    )
+                    
+                    if has_model:
+                        current_scale *= 2
+                        current_size = next_size
+                        max_scale = max(max_scale, current_scale)
+                    else:
+                        break
+            
+            # Tamaño recomendado (el más común o el medio)
+            recommended_start = input_sizes[len(input_sizes) // 2] if input_sizes else 256
+            
+            return {
+                "available_sizes": input_sizes,
+                "max_scale": max_scale,
+                "recommended_start": recommended_start,
+                "total_models": len(available_models),
+                "architecture": architecture
+            }
+        except Exception as e:
+            logger.error(f"Error obteniendo recomendaciones de modelo: {e}")
+            return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
+    
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Obtiene lista de modelos disponibles"""
         try:
@@ -127,7 +177,8 @@ class APIClient:
                                     x: int = 0,
                                     y: int = 0,
                                     width: int = 256,
-                                    height: int = 256) -> Optional[Dict[str, Any]]:
+                                    height: int = 256,
+                                    evaluate_quality: bool = False) -> Optional[Dict[str, Any]]:
         """Procesa upsampling secuencial"""
         try:
             # Preparar archivo
@@ -142,7 +193,8 @@ class APIClient:
                 "x": x,
                 "y": y,
                 "width": width,
-                "height": height
+                "height": height,
+                "evaluate_quality": evaluate_quality
             }
             
             response = self.session.post(
@@ -219,48 +271,50 @@ class APIClient:
         
         return True, f"Ruta válida: {len(path_info['path'])} pasos"
     
-    def get_model_recommendations(self, architecture: str) -> Dict[str, Any]:
-        """Obtiene recomendaciones de configuración para una arquitectura"""
-        arch_models = self.get_models_by_architecture(architecture)
-        
-        if not arch_models:
-            return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
-        
-        available_models = [m for m in arch_models["models"] if m["available"]]
-        
-        if not available_models:
-            return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
-        
-        # Calcular tamaños disponibles y escalas máximas
-        input_sizes = sorted(list(set([m["input_size"] for m in available_models])))
-        
-        # Calcular escala máxima posible
-        max_scale = 1
-        for start_size in input_sizes:
-            current_scale = 1
-            current_size = start_size
+    def get_kimianet_status(self) -> Optional[Dict[str, Any]]:
+        """Obtiene el estado de KimiaNet"""
+        try:
+            response = self.session.get(f"{self.base_url}/kimianet_status", timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            logger.error(f"Error obteniendo estado de KimiaNet: {e}")
+            return None
+    
+    def evaluate_image_quality(self, 
+                             original_file, 
+                             enhanced_file,
+                             calculate_perceptual: bool = True) -> Optional[Dict[str, Any]]:
+        """Evalúa la calidad de una imagen procesada vs original"""
+        try:
+            # Preparar archivos
+            if hasattr(original_file, 'seek'):
+                original_file.seek(0)
+            if hasattr(enhanced_file, 'seek'):
+                enhanced_file.seek(0)
             
-            while True:
-                next_size = current_size * 2
-                has_model = any(
-                    m["input_size"] == current_size and m["output_size"] == next_size 
-                    for m in available_models
-                )
+            files = {
+                "original_file": ("original.png", original_file, "image/png"),
+                "enhanced_file": ("enhanced.png", enhanced_file, "image/png")
+            }
+            data = {
+                "calculate_perceptual": calculate_perceptual
+            }
+            
+            response = self.session.post(
+                f"{self.base_url}/evaluate_quality",
+                files=files,
+                data=data,
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Error evaluando calidad: HTTP {response.status_code} - {response.text}")
+                return None
                 
-                if has_model:
-                    current_scale *= 2
-                    current_size = next_size
-                    max_scale = max(max_scale, current_scale)
-                else:
-                    break
-        
-        # Tamaño recomendado (el más común o el medio)
-        recommended_start = input_sizes[len(input_sizes) // 2] if input_sizes else 256
-        
-        return {
-            "available_sizes": input_sizes,
-            "max_scale": max_scale,
-            "recommended_start": recommended_start,
-            "total_models": len(available_models),
-            "architecture": architecture
-        }
+        except Exception as e:
+            logger.error(f"Error en evaluate_image_quality: {e}")
+            return None

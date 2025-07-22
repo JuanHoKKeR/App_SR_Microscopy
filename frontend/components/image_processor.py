@@ -24,7 +24,8 @@ class ImageProcessorUI:
     def process_sequential_upsampling(self, 
                                     uploaded_file, 
                                     selection: Dict[str, int], 
-                                    config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+                                    config: Dict[str, Any],
+                                    evaluate_quality: bool = False) -> Optional[Dict[str, Any]]:
         """Procesa upsampling secuencial con UI de progreso"""
         
         architecture = config["architecture"]
@@ -78,7 +79,8 @@ class ImageProcessorUI:
                 x=selection["x"],
                 y=selection["y"], 
                 width=selection["width"],
-                height=selection["height"]
+                height=selection["height"],
+                evaluate_quality=evaluate_quality
             )
             
             if not result:

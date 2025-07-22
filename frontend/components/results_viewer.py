@@ -163,16 +163,162 @@ class ResultsViewer:
     
     def _show_quality_metrics(self, result: Dict[str, Any]):
         """Muestra métricas de calidad si están disponibles"""
-        # Placeholder para métricas futuras
-        with st.expander("📈 Métricas de Calidad (Próximamente)"):
-            st.info("""
-            🚧 **Funcionalidades futuras:**
-            - PSNR (Peak Signal-to-Noise Ratio)
-            - SSIM (Structural Similarity Index)
-            - Índice Perceptual con KimiaNet
-            - Detección de artefactos
-            - Análisis de bordes y texturas
-            """)
+        quality_metrics = result.get("quality_metrics")
+        
+        if quality_metrics and "error" not in quality_metrics:
+            st.markdown("### 📈 Métricas de Calidad")
+            
+            # Métricas principales
+            col1, col2, col3 = st.columns(3)
+            
+            metrics = quality_metrics.get("metrics") or quality_metrics
+            interpretation = quality_metrics.get("interpretation", {})
+            
+            with col1:
+                psnr_val = metrics.get("psnr", -1)
+                if psnr_val > 0:
+                    show_metric_card(
+                        f"{psnr_val:.2f} dB",
+                        f"PSNR - {interpretation.get('psnr', 'N/A')}"
+                    )
+            
+            with col2:
+                ssim_val = metrics.get("ssim", -1)
+                if ssim_val > 0:
+                    show_metric_card(
+                        f"{ssim_val:.4f}",
+                        f"SSIM - {interpretation.get('ssim', 'N/A')}"
+                    )
+            
+            with col3:
+                perceptual_val = metrics.get("perceptual_index", -1)
+                if perceptual_val >= 0:
+                    show_metric_card(
+                        f"{perceptual_val:.6f}",
+                        f"Índice Perceptual - {interpretation.get('perceptual', 'N/A')}"
+                    )
+            
+            # Información adicional
+            kimianet_used = quality_metrics.get("kimianet_used", False)
+            if kimianet_used:
+                show_info_box("""
+                🧠 **KimiaNet Utilizado:** Las métricas perceptuales se calcularon usando DenseNet121 
+                con pesos KimiaNet, específicamente entrenado para imágenes de histopatología.
+                """, "success")
+            else:
+                show_info_box("""
+                ⚠️ **KimiaNet No Disponible:** Las métricas PSNR y SSIM están disponibles, 
+                pero el índice perceptual no se pudo calcular sin KimiaNet.
+                """, "warning")
+            
+            # Explicación de métricas
+            with st.expander("ℹ️ Explicación de Métricas"):
+                st.markdown("""
+                **PSNR (Peak Signal-to-Noise Ratio):**
+                - Mide la relación entre señal y ruido
+                - Valores más altos = mejor calidad
+                - Típico: 20-35 dB para super-resolución
+                
+                **SSIM (Structural Similarity Index):**
+                - Mide similitud estructural percibida
+                - Rango: 0-1, valores más altos = mejor
+                - Considera luminancia, contraste y estructura
+                
+                **Índice Perceptual (KimiaNet):**
+                - Distancia en espacio de características KimiaNet
+                - Valores más bajos = mayor similitud perceptual
+                - Específicamente entrenado para histopatología
+                """)
+        
+        elif quality_metrics and "error" in quality_metrics:
+            show_info_box(f"""
+            ⚠️ **Error en evaluación de calidad:** {quality_metrics['error']}<br>
+            Las métricas de calidad no están disponibles para este resultado.
+            """, "warning")
+        
+        else:
+            # Placeholder para métricas futuras si no hay métricas
+            with st.expander("📈 Métricas de Calidad (No disponibles)"):
+                st.info("""
+                🚧 **Para obtener métricas de calidad:**
+                - Habilita "Evaluar Calidad" en la configuración
+                - Asegúrate de que KimiaNet esté disponible
+                - Las métricas incluyen PSNR, SSIM e Índice Perceptual
+                """)
+                
+                # Botón para verificar KimiaNet
+                if st.button("🔍 Verificar Estado de KimiaNet"):
+                    # Esto se puede implementar para hacer una llamada a la API
+                    st.info("Verificando estado de KimiaNet...")
+    
+    def show_quality_comparison(self, results: List[Dict[str, Any]]):
+        """Compara métricas de calidad entre diferentes resultados"""
+        st.markdown("### ⚖️ Comparación de Calidad")
+        
+        # Filtrar resultados que tienen métricas de calidad
+        results_with_metrics = [
+            r for r in results 
+            if r.get("quality_metrics") and "error" not in r.get("quality_metrics", {})
+        ]
+        
+        if len(results_with_metrics) < 2:
+            st.info("Se necesitan al menos 2 resultados con métricas de calidad para comparar")
+            return
+        
+        # Crear tabla comparativa
+        comparison_data = []
+        for result in results_with_metrics:
+            metrics = result.get("quality_metrics", {}).get("metrics") or result.get("quality_metrics", {})
+            
+            comparison_data.append({
+                "Arquitectura": result.get("architecture", "N/A"),
+                "Escala": f"x{result.get('target_scale', 'N/A')}",
+                "PSNR (dB)": f"{metrics.get('psnr', -1):.2f}" if metrics.get('psnr', -1) > 0 else "N/A",
+                "SSIM": f"{metrics.get('ssim', -1):.4f}" if metrics.get('ssim', -1) > 0 else "N/A",
+                "Índice Perceptual": f"{metrics.get('perceptual_index', -1):.6f}" if metrics.get('perceptual_index', -1) >= 0 else "N/A"
+            })
+        
+        # Mostrar tabla
+        import pandas as pd
+        df = pd.DataFrame(comparison_data)
+        st.dataframe(df, use_container_width=True)
+        
+        # Análisis automático
+        if len(comparison_data) > 1:
+            st.markdown("**🏆 Análisis Automático:**")
+            
+            # Encontrar mejores valores
+            best_psnr = max([float(d["PSNR (dB)"].replace(" dB", "")) for d in comparison_data if d["PSNR (dB)"] != "N/A"])
+            best_ssim = max([float(d["SSIM"]) for d in comparison_data if d["SSIM"] != "N/A"])
+            
+            best_psnr_arch = next(d["Arquitectura"] for d in comparison_data if d["PSNR (dB)"] != "N/A" and float(d["PSNR (dB)"].replace(" dB", "")) == best_psnr)
+            best_ssim_arch = next(d["Arquitectura"] for d in comparison_data if d["SSIM"] != "N/A" and float(d["SSIM"]) == best_ssim)
+            
+            st.markdown(f"- **Mejor PSNR:** {best_psnr_arch} ({best_psnr:.2f} dB)")
+            st.markdown(f"- **Mejor SSIM:** {best_ssim_arch} ({best_ssim:.4f})")
+            
+            # Análisis perceptual si está disponible
+            perceptual_values = [float(d["Índice Perceptual"]) for d in comparison_data if d["Índice Perceptual"] != "N/A"]
+            if perceptual_values:
+                best_perceptual = min(perceptual_values)  # Menor es mejor
+                best_perceptual_arch = next(d["Arquitectura"] for d in comparison_data if d["Índice Perceptual"] != "N/A" and float(d["Índice Perceptual"]) == best_perceptual)
+                st.markdown(f"- **Mejor Índice Perceptual:** {best_perceptual_arch} ({best_perceptual:.6f})")
+    
+    def show_kimianet_info(self):
+        """Muestra información sobre KimiaNet"""
+        st.markdown("### 🧠 Acerca de KimiaNet")
+        
+        show_info_box("""
+        **KimiaNet** es una red neuronal convolucional pre-entrenada específicamente para 
+        imágenes de histopatología. Utiliza la arquitectura DenseNet121 y ha sido entrenada 
+        en un gran dataset de imágenes médicas para extraer características relevantes 
+        para el análisis de tejidos.
+        
+        **En esta aplicación:**
+        - Se usa para calcular un índice perceptual especializado
+        - Evalúa la similitud entre imágenes en el espacio de características médicas
+        - Proporciona una métrica más relevante que PSNR/SSIM para histopatología
+        """, "info")
     
     def _show_download_options(self, result: Dict[str, Any]):
         """Muestra opciones de descarga"""

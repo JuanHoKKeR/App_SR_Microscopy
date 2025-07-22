@@ -140,11 +140,41 @@ class PatchSelector:
             - **Tiempo estimado:** {self._estimate_processing_time(len(scale_options))} segundos
             """)
         
+        # Opciones avanzadas
+        with st.expander("🔬 Opciones Avanzadas"):
+            # Verificar estado de KimiaNet
+            kimianet_status = self.api_client.get_kimianet_status()
+            kimianet_available = kimianet_status and kimianet_status.get("available", False)
+            
+            if kimianet_available:
+                st.success("✅ KimiaNet disponible para evaluación perceptual")
+                evaluate_quality = st.checkbox(
+                    "🧠 Evaluar calidad con KimiaNet",
+                    value=False,
+                    help="Calcula PSNR, SSIM e índice perceptual usando KimiaNet (toma más tiempo)"
+                )
+            else:
+                st.warning("⚠️ KimiaNet no disponible - solo PSNR/SSIM")
+                evaluate_quality = st.checkbox(
+                    "📊 Evaluar calidad básica",
+                    value=False,
+                    help="Calcula PSNR y SSIM (KimiaNet no disponible)"
+                )
+            
+            # Mostrar información de KimiaNet
+            if st.button("ℹ️ Acerca de KimiaNet"):
+                st.info("""
+                **KimiaNet** es una red pre-entrenada específicamente para histopatología que 
+                proporciona métricas de calidad más relevantes para imágenes médicas que 
+                las métricas tradicionales como PSNR y SSIM.
+                """)
+        
         return {
             "architecture": architecture,
             "patch_size": patch_size,
             "target_scale": target_scale,
-            "path_info": path_info
+            "path_info": path_info,
+            "evaluate_quality": evaluate_quality
         }
     
     def show_interactive_canvas(self, image: np.ndarray) -> Optional[Dict]:

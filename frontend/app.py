@@ -174,7 +174,8 @@ def handle_patch_selection_mode(api_client, available_models, architecture):
                             result = image_processor.process_sequential_upsampling(
                                 uploaded_file, 
                                 selection, 
-                                config
+                                config,
+                                evaluate_quality=config.get("evaluate_quality", False)
                             )
                             
                             if result:

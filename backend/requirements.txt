@@ -21,6 +21,8 @@ basicsr==1.4.2
 
 # Utilidades
 requests==2.31.0
+pandas==2.1.4
+matplotlib==3.8.2
 
 # Logging y configuración
 python-dotenv==1.0.0

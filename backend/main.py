@@ -26,6 +26,7 @@ from models.config import MODEL_CONFIGS, get_available_models, validate_model_st
 from models.loader import model_loader
 from processing.image_processor import image_processor
 from utils.image_utils import image_utils
+from utils.quality_evaluator import quality_evaluator
 
 # Crear aplicación FastAPI
 app = FastAPI(
@@ -70,10 +71,8 @@ class SequentialUpsamplingRequest(BaseModel):
     width: int = 256
     height: int = 256
 
-class ProcessResponse(BaseModel):
-    success: bool
-    message: str
-    data: Optional[Dict[str, Any]] = None
+class EvaluateQualityRequest(BaseModel):
+    calculate_perceptual: bool = True
 
 # Event handlers
 @app.on_event("startup")
@@ -248,7 +247,8 @@ async def process_sequential_upsampling(
     x: int = 0,
     y: int = 0,
     width: int = 256,
-    height: int = 256
+    height: int = 256,
+    evaluate_quality: bool = False
 ):
     """Procesa upsampling secuencial para alcanzar factores de escala altos"""
     
@@ -262,6 +262,7 @@ async def process_sequential_upsampling(
         
         # Extraer parche
         patch = image_processor.extract_patch(image, x, y, width, height)
+        original_patch = patch.copy()  # Guardar original para evaluación
         
         # Redimensionar a start_size si es necesario
         if patch.shape[0] != start_size or patch.shape[1] != start_size:
@@ -278,7 +279,7 @@ async def process_sequential_upsampling(
                 detail=f"No se puede alcanzar x{target_scale} con {architecture}"
             )
         
-        # Preparar respuesta
+        # Preparar respuesta base
         response_data = {
             "success": True,
             "architecture": architecture,
@@ -286,7 +287,8 @@ async def process_sequential_upsampling(
             "upsampling_path": result["upsampling_path"],
             "original_size": result["original_size"],
             "final_size": result["final_size"],
-            "steps": []
+            "steps": [],
+            "quality_metrics": None
         }
         
         # Convertir imágenes de cada paso a base64
@@ -303,6 +305,37 @@ async def process_sequential_upsampling(
         # Imagen original y final
         response_data["original_patch"] = image_utils.image_to_base64(result["original_patch"])
         response_data["final_result"] = image_utils.image_to_base64(result["final_result"])
+        
+        # Evaluación de calidad opcional
+        if evaluate_quality and target_scale >= 2:
+            try:
+                # Para evaluación, redimensionar original al tamaño final para comparación
+                final_result = result["final_result"]
+                original_resized = image_utils.resize_image(
+                    original_patch, 
+                    (final_result.shape[1], final_result.shape[0])
+                )
+                
+                quality_results = quality_evaluator.evaluate_image_quality(
+                    original=original_resized,
+                    enhanced=final_result,
+                    calculate_perceptual=True
+                )
+                
+                if quality_results["evaluation_success"]:
+                    interpretation = quality_evaluator.get_quality_interpretation(quality_results)
+                    response_data["quality_metrics"] = {
+                        "psnr": quality_results["psnr"],
+                        "ssim": quality_results["ssim"],
+                        "perceptual_index": quality_results["perceptual_index"],
+                        "interpretation": interpretation,
+                        "kimianet_used": quality_evaluator.is_kimianet_available()
+                    }
+                    logger.info(f"Evaluación de calidad completada - PSNR: {quality_results['psnr']:.4f}")
+                
+            except Exception as e:
+                logger.warning(f"Error en evaluación de calidad: {e}")
+                response_data["quality_metrics"] = {"error": str(e)}
         
         return JSONResponse(response_data)
         
@@ -389,8 +422,78 @@ async def get_stats():
         "memory_usage": model_loader.get_memory_usage(),
         "loaded_models": list(model_loader.get_loaded_models().keys()),
         "available_models": len(get_available_models()),
-        "total_configured_models": len(MODEL_CONFIGS)
+        "total_configured_models": len(MODEL_CONFIGS),
+        "kimianet_available": quality_evaluator.is_kimianet_available()
     }
+
+@app.post("/evaluate_quality")
+async def evaluate_image_quality(
+    original_file: UploadFile = File(...),
+    enhanced_file: UploadFile = File(...),
+    calculate_perceptual: bool = True
+):
+    """Evalúa la calidad de una imagen procesada vs original usando KimiaNet"""
+    
+    try:
+        # Leer imágenes
+        original_contents = await original_file.read()
+        enhanced_contents = await enhanced_file.read()
+        
+        original_image = image_utils.bytes_to_image(original_contents)
+        enhanced_image = image_utils.bytes_to_image(enhanced_contents)
+        
+        if original_image is None or enhanced_image is None:
+            raise HTTPException(status_code=400, detail="No se pudieron procesar las imágenes")
+        
+        # Evaluar calidad
+        results = quality_evaluator.evaluate_image_quality(
+            original=original_image,
+            enhanced=enhanced_image,
+            calculate_perceptual=calculate_perceptual
+        )
+        
+        if not results["evaluation_success"]:
+            raise HTTPException(status_code=500, detail=f"Error en evaluación: {results.get('error_message', 'Error desconocido')}")
+        
+        # Obtener interpretación
+        interpretation = quality_evaluator.get_quality_interpretation(results)
+        
+        return JSONResponse({
+            "success": True,
+            "metrics": {
+                "psnr": results["psnr"],
+                "ssim": results["ssim"],
+                "perceptual_index": results["perceptual_index"]
+            },
+            "interpretation": interpretation,
+            "kimianet_used": quality_evaluator.is_kimianet_available(),
+            "original_image_info": image_utils.get_image_info(original_image),
+            "enhanced_image_info": image_utils.get_image_info(enhanced_image)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en evaluación de calidad: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@app.get("/kimianet_status")
+async def get_kimianet_status():
+    """Obtiene el estado de KimiaNet"""
+    is_available = quality_evaluator.is_kimianet_available()
+    
+    status_info = {
+        "available": is_available,
+        "weights_path": quality_evaluator.kimianet_weights_path if quality_evaluator.kimianet_evaluator else None,
+        "model_loaded": quality_evaluator.kimianet_evaluator is not None
+    }
+    
+    if is_available:
+        status_info["message"] = "KimiaNet está disponible para evaluación perceptual"
+    else:
+        status_info["message"] = "KimiaNet no está disponible - verificar pesos del modelo"
+    
+    return status_info
 
 if __name__ == "__main__":
     uvicorn.run(
