@@ -1,0 +1,22 @@
+# Frontend Streamlit Requirements
+streamlit==1.28.1
+streamlit-drawable-canvas==0.9.3
+
+# Procesamiento de imágenes (solo lo necesario)
+opencv-python==4.8.1.78
+Pillow==10.1.0
+numpy==1.24.4
+
+# HTTP requests para API
+requests==2.31.0
+
+# Utilidades de UI
+plotly==5.17.0
+altair==5.1.2
+
+# Configuración
+python-dotenv==1.0.0
+
+# Opcional para mejores gráficos
+matplotlib==3.8.2
+seaborn==0.13.0

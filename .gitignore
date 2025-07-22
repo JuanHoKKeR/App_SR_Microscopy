@@ -1,0 +1,12 @@
+models/**/*
+!models/**/
+!models/**/README.md
+!models/**/.gitkeep
+models/**/assets/
+models/**/assets/**
+models/**/variables/
+models/**/variables/**
+
+frontend/venv-front
+
+backend/venv-backend
