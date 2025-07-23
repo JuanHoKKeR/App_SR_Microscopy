@@ -58,8 +58,8 @@ class ModelLoader:
             elif training_patch_size == 128:
                 model = net(
                     upscale=scale, in_chans=3, img_size=training_patch_size, window_size=8,
-                    img_range=1., depths=[6, 6, 6, 6], embed_dim=180, 
-                    num_heads=[6, 6, 6, 6], mlp_ratio=2, 
+                    img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, 
+                    num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2, 
                     upsampler='pixelshuffle', resi_connection='1conv'
                 )
             elif training_patch_size == 256:
@@ -72,8 +72,8 @@ class ModelLoader:
             elif training_patch_size == 512:
                 model = net(
                     upscale=scale, in_chans=3, img_size=training_patch_size, window_size=8,
-                    img_range=1., depths=[4, 4, 4, 4], embed_dim=60, 
-                    num_heads=[4, 4, 4, 4], mlp_ratio=2, 
+                    img_range=1., depths=[4, 4, 4], embed_dim=60, 
+                    num_heads=[4, 4, 4], mlp_ratio=2, 
                     upsampler='pixelshuffle', resi_connection='1conv'
                 )
             else:
