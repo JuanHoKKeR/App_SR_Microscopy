@@ -1,6 +1,6 @@
 """
-Componente para selección interactiva de parches
-Maneja el canvas y la extracción de coordenadas
+Componente corregido para selección interactiva de parches
+Corrige problemas de selección de coordenadas y configuración por escala
 """
 
 import streamlit as st
@@ -17,11 +17,11 @@ from .api_client import APIClient
 logger = logging.getLogger(__name__)
 
 class PatchSelector:
-    """Selector interactivo de parches de imagen"""
+    """Selector interactivo de parches corregido"""
     
     def __init__(self, api_client: APIClient):
         self.api_client = api_client
-        self.max_canvas_width = 800
+        self.max_canvas_width = 600
         self.max_canvas_height = 600
     
     def load_and_display_image(self, uploaded_file) -> Optional[np.ndarray]:
@@ -47,7 +47,7 @@ class PatchSelector:
     
     def _display_image_info(self, image: np.ndarray, filename: str):
         """Muestra información detallada de la imagen"""
-        st.markdown('<h3 class="sub-header">📊 Información de la Imagen</h3>', unsafe_allow_html=True)
+        st.markdown('<h4>📊 Información de la Imagen</h4>', unsafe_allow_html=True)
         
         # Métricas en columnas
         col1, col2, col3, col4 = st.columns(4)
@@ -71,9 +71,9 @@ class PatchSelector:
         **Formato interno:** {image.dtype}
         """)
     
-    def show_patch_configuration(self, available_models: list, architecture: str) -> Optional[Dict[str, Any]]:
-        """Muestra panel de configuración de parches"""
-        st.markdown("**⚙️ Configuración del Parche:**")
+    def show_scale_configuration(self, available_models: list, architecture: str) -> Optional[Dict[str, Any]]:
+        """Muestra configuración basada en factor de escala en lugar de modelo específico"""
+        st.markdown("**⚙️ Configuración de Procesamiento:**")
         
         # Filtrar modelos por arquitectura seleccionada
         arch_models = [m for m in available_models 
@@ -83,103 +83,123 @@ class PatchSelector:
             st.error(f"❌ No hay modelos disponibles para {architecture}")
             return None
         
-        # Obtener recomendaciones
-        recommendations = self.api_client.get_model_recommendations(architecture)
+        # Obtener tamaños de parche disponibles
+        available_patch_sizes = sorted(list(set([m["input_size"] for m in arch_models])))
         
         # Configuración de tamaño de parche
-        available_sizes = recommendations.get("available_sizes", [64, 128, 256, 512])
-        if not available_sizes:
-            available_sizes = [256]  # Fallback
+        col1, col2 = st.columns(2)
         
-        recommended_size = recommendations.get("recommended_start", 256)
-        default_index = available_sizes.index(recommended_size) if recommended_size in available_sizes else 0
+        with col1:
+            patch_size = st.selectbox(
+                "📐 Tamaño de Parche:",
+                available_patch_sizes,
+                index=len(available_patch_sizes)-1 if available_patch_sizes else 0,
+                help=f"Tamaños disponibles para {architecture}",
+                key="patch_size_select"
+            )
         
-        patch_size = st.selectbox(
-            "Tamaño del Parche:",
-            available_sizes,
-            index=default_index,
-            help=f"Tamaños disponibles para {architecture}"
-        )
-        
-        # Configuración de factor de escalado
-        max_recommended_scale = min(recommendations.get("max_scale", 16), 16)
-        scale_options = [2**i for i in range(1, int(np.log2(max_recommended_scale)) + 2) if 2**i <= 16]
-        
-        target_scale = st.selectbox(
-            "Factor de Escalado:",
-            scale_options,
-            index=0,
-            help=f"Factor de escalado (máximo recomendado: x{max_recommended_scale})"
-        )
-        
-        # Validar factibilidad
-        is_feasible, message = self.api_client.validate_upsampling_feasibility(
-            architecture, patch_size, target_scale
-        )
-        
-        if is_feasible:
-            st.success(f"✅ {message}")
+        with col2:
+            # Calcular escalas máximas posibles desde este tamaño de parche
+            max_possible_scales = self._calculate_max_scale(patch_size, arch_models)
             
-            # Mostrar ruta de procesamiento
-            path_info = self.api_client.get_upsampling_path(architecture, patch_size, target_scale)
-            if path_info:
-                with st.expander("Ver ruta de procesamiento"):
-                    st.markdown(f"**Pasos requeridos:** {len(path_info['path'])}")
-                    for i, model_name in enumerate(path_info['path']):
-                        st.markdown(f"**{i+1}.** {model_name}")
-        else:
-            st.error(f"❌ {message}")
+            # Opciones de escala disponibles
+            scale_options = []
+            for scale in [2, 4, 8, 16]:
+                if scale <= max_possible_scales:
+                    scale_options.append(scale)
+            
+            if not scale_options:
+                st.error("❌ No hay escalas disponibles para este tamaño de parche")
+                return None
+            
+            target_scale = st.selectbox(
+                "🔍 Factor de Escala:",
+                scale_options,
+                help=f"Escala máxima disponible: x{max_possible_scales}",
+                key="target_scale_select"
+            )
+        
+        # Validar y obtener ruta de procesamiento
+        processing_path = self._get_processing_path(patch_size, target_scale, architecture, arch_models)
+        
+        if not processing_path:
+            st.error(f"❌ No se puede alcanzar x{target_scale} desde {patch_size}px con {architecture}")
             return None
         
-        # Información adicional
-        with st.expander("ℹ️ Información adicional"):
-            st.markdown(f"""
-            - **Arquitectura seleccionada:** {architecture}
-            - **Modelos disponibles:** {len(arch_models)}
-            - **Tamaño final esperado:** {patch_size * target_scale} × {patch_size * target_scale} px
-            - **Tiempo estimado:** {self._estimate_processing_time(len(scale_options))} segundos
-            """)
-        
-        # Opciones avanzadas
-        with st.expander("🔬 Opciones Avanzadas"):
-            # Verificar estado de KimiaNet
-            kimianet_status = self.api_client.get_kimianet_status()
-            kimianet_available = kimianet_status and kimianet_status.get("available", False)
-            
-            if kimianet_available:
-                st.success("✅ KimiaNet disponible para evaluación perceptual")
-                evaluate_quality = st.checkbox(
-                    "🧠 Evaluar calidad con KimiaNet",
-                    value=False,
-                    help="Calcula PSNR, SSIM e índice perceptual usando KimiaNet (toma más tiempo)"
-                )
-            else:
-                st.warning("⚠️ KimiaNet no disponible - solo PSNR/SSIM")
-                evaluate_quality = st.checkbox(
-                    "📊 Evaluar calidad básica",
-                    value=False,
-                    help="Calcula PSNR y SSIM (KimiaNet no disponible)"
-                )
-            
-            # Mostrar información de KimiaNet
-            if st.button("ℹ️ Acerca de KimiaNet"):
-                st.info("""
-                **KimiaNet** es una red pre-entrenada específicamente para histopatología que 
-                proporciona métricas de calidad más relevantes para imágenes médicas que 
-                las métricas tradicionales como PSNR y SSIM.
-                """)
+        # Mostrar información del procesamiento
+        self._show_processing_info(processing_path, patch_size, target_scale, architecture)
         
         return {
             "architecture": architecture,
             "patch_size": patch_size,
             "target_scale": target_scale,
-            "path_info": path_info,
-            "evaluate_quality": evaluate_quality
+            "processing_path": processing_path,
+            "final_size": patch_size * target_scale
         }
     
-    def show_interactive_canvas(self, image: np.ndarray) -> Optional[Dict]:
+    def _calculate_max_scale(self, patch_size: int, arch_models: list) -> int:
+        """Calcula la escala máxima posible desde un tamaño de parche dado"""
+        max_scale = 1
+        current_size = patch_size
+        
+        while True:
+            next_size = current_size * 2
+            # Buscar si existe un modelo que vaya de current_size a next_size
+            model_exists = any(
+                m["input_size"] == current_size and m["output_size"] == next_size 
+                for m in arch_models
+            )
+            
+            if model_exists:
+                max_scale *= 2
+                current_size = next_size
+            else:
+                break
+        
+        return max_scale
+    
+    def _get_processing_path(self, start_size: int, target_scale: int, architecture: str, arch_models: list) -> list:
+        """Obtiene la ruta de modelos necesarios para alcanzar la escala objetivo"""
+        path = []
+        current_size = start_size
+        target_size = start_size * target_scale
+        
+        while current_size < target_size:
+            next_size = current_size * 2
+            
+            # Buscar modelo que vaya de current_size a next_size
+            model_found = None
+            for model in arch_models:
+                if model["input_size"] == current_size and model["output_size"] == next_size:
+                    model_found = model["name"]
+                    break
+            
+            if model_found:
+                path.append(model_found)
+                current_size = next_size
+            else:
+                break
+        
+        return path if current_size == target_size else []
+    
+    def _show_processing_info(self, processing_path: list, patch_size: int, target_scale: int, architecture: str):
+        """Muestra información detallada del procesamiento que se realizará"""
+        with st.expander("ℹ️ Detalles del Procesamiento"):
+            st.markdown(f"**🏗️ Arquitectura:** {architecture}")
+            st.markdown(f"**📐 Tamaño inicial:** {patch_size} × {patch_size} px")
+            st.markdown(f"**🔍 Factor de escala:** ×{target_scale}")
+            st.markdown(f"**📏 Tamaño final:** {patch_size * target_scale} × {patch_size * target_scale} px")
+            st.markdown(f"**🔄 Pasos requeridos:** {len(processing_path)}")
+            
+            st.markdown("**📋 Secuencia de modelos:**")
+            current_size = patch_size
+            for i, model_name in enumerate(processing_path):
+                next_size = current_size * 2
+                st.markdown(f"   **{i+1}.** {model_name}: {current_size}×{current_size} → {next_size}×{next_size}")
+                current_size = next_size
+    
+    def show_interactive_canvas(self, image: np.ndarray, patch_size: int) -> Optional[Dict]:
         """Muestra canvas interactivo para selección de parches"""
-        st.markdown('<h3 class="sub-header">🎯 Selección de Parche</h3>', unsafe_allow_html=True)
         
         # Calcular dimensiones del canvas
         canvas_width, canvas_height, scale_factor = self._calculate_canvas_dimensions(image)
@@ -188,37 +208,37 @@ class PatchSelector:
         display_image = self._prepare_display_image(image, canvas_width, canvas_height)
         
         # Instrucciones
-        st.markdown("""
+        st.markdown(f"""
         <div class="instruction-text">
         🖱️ <strong>Instrucciones:</strong> Dibuja un rectángulo sobre la región que deseas procesar.
-        El parche se ajustará automáticamente al tamaño configurado.
+        El parche se ajustará automáticamente a {patch_size}×{patch_size} píxeles.
         </div>
         """, unsafe_allow_html=True)
         
         # Canvas interactivo
         canvas_result = st_canvas(
-            fill_color="rgba(255, 165, 0, 0.2)",  # Naranja transparente
-            stroke_width=3,
+            fill_color="rgba(255, 165, 0, 0.3)",  # Naranja transparente
+            stroke_width=2,
             stroke_color="#FF4500",  # Naranja sólido
             background_image=Image.fromarray(cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)),
             update_streamlit=True,
             width=canvas_width,
             height=canvas_height,
             drawing_mode="rect",
-            key="patch_selector_canvas",
+            key="patch_canvas",
             display_toolbar=True
         )
         
         # Mostrar información de selección
         if canvas_result.json_data is not None and canvas_result.json_data["objects"]:
-            self._display_selection_info(canvas_result, image.shape, scale_factor)
+            self._display_selection_info(canvas_result, image.shape, scale_factor, patch_size)
         else:
-            show_info_box("Dibuja un rectángulo para seleccionar el parche a procesar", "info")
+            show_info_box(f"Dibuja un rectángulo para seleccionar el parche de {patch_size}×{patch_size} píxeles", "info")
         
         return canvas_result
     
-    def extract_selection_coordinates(self, canvas_result: Dict, image: np.ndarray) -> Optional[Dict[str, int]]:
-        """Extrae coordenadas de la selección del canvas"""
+    def extract_selection_coordinates(self, canvas_result: Dict, image: np.ndarray, patch_size: int) -> Optional[Dict[str, int]]:
+        """Extrae coordenadas de la selección del canvas y las ajusta al tamaño de parche"""
         if not canvas_result.json_data or not canvas_result.json_data["objects"]:
             st.warning("⚠️ No hay selección. Dibuja un rectángulo primero.")
             return None
@@ -230,28 +250,31 @@ class PatchSelector:
             # Calcular factor de escala
             canvas_width, canvas_height, scale_factor = self._calculate_canvas_dimensions(image)
             
-            # Coordenadas en la imagen original
-            x = int(rect["left"] / scale_factor)
-            y = int(rect["top"] / scale_factor)
-            width = int(rect["width"] / scale_factor)
-            height = int(rect["height"] / scale_factor)
+            # Coordenadas del centro del rectángulo en la imagen original
+            center_x = int((rect["left"] + rect["width"]/2) / scale_factor)
+            center_y = int((rect["top"] + rect["height"]/2) / scale_factor)
             
-            # Validar coordenadas
-            img_height, img_width = image.shape[:2]
-            x = max(0, min(x, img_width - 1))
-            y = max(0, min(y, img_height - 1))
-            width = min(width, img_width - x)
-            height = min(height, img_height - y)
+            # Calcular coordenadas del parche centrado
+            half_patch = patch_size // 2
+            x = max(0, min(center_x - half_patch, image.shape[1] - patch_size))
+            y = max(0, min(center_y - half_patch, image.shape[0] - patch_size))
+            
+            # Asegurar que el parche esté completamente dentro de la imagen
+            if x + patch_size > image.shape[1]:
+                x = image.shape[1] - patch_size
+            if y + patch_size > image.shape[0]:
+                y = image.shape[0] - patch_size
             
             return {
                 "x": x,
                 "y": y,
-                "width": width,
-                "height": height
+                "width": patch_size,
+                "height": patch_size
             }
             
         except Exception as e:
             st.error(f"Error extrayendo coordenadas: {e}")
+            logger.error(f"Error extrayendo coordenadas: {e}")
             return None
     
     def _calculate_canvas_dimensions(self, image: np.ndarray) -> Tuple[int, int, float]:
@@ -277,56 +300,46 @@ class PatchSelector:
         
         return display_image
     
-    def _display_selection_info(self, canvas_result: Dict, image_shape: Tuple, scale_factor: float):
+    def _display_selection_info(self, canvas_result: Dict, image_shape: Tuple, scale_factor: float, patch_size: int):
         """Muestra información de la selección actual"""
         try:
             rect = canvas_result.json_data["objects"][-1]
             
-            # Coordenadas en imagen original
-            x = int(rect["left"] / scale_factor)
-            y = int(rect["top"] / scale_factor)
-            width = int(rect["width"] / scale_factor)
-            height = int(rect["height"] / scale_factor)
+            # Coordenadas del centro del rectángulo en imagen original
+            center_x = int((rect["left"] + rect["width"]/2) / scale_factor)
+            center_y = int((rect["top"] + rect["height"]/2) / scale_factor)
             
-            # Validar coordenadas
-            img_height, img_width = image_shape[:2]
-            x = max(0, min(x, img_width))
-            y = max(0, min(y, img_height))
-            width = min(width, img_width - x)
-            height = min(height, img_height - y)
+            # Calcular coordenadas del parche final
+            half_patch = patch_size // 2
+            x = max(0, min(center_x - half_patch, image_shape[1] - patch_size))
+            y = max(0, min(center_y - half_patch, image_shape[0] - patch_size))
             
             # Mostrar información
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown(f"""
-                **📍 Coordenadas:**
+                **📍 Coordenadas del Parche:**
                 - X: {x} px
                 - Y: {y} px
                 """)
             with col2:
                 st.markdown(f"""
                 **📏 Dimensiones:**
-                - Ancho: {width} px
-                - Alto: {height} px
+                - Ancho: {patch_size} px
+                - Alto: {patch_size} px
                 """)
             
-            # Advertencias si es necesario
-            if width != height:
-                st.warning(f"⚠️ El parche se cuadrará automáticamente (se usará el menor: {min(width, height)}px)")
+            # Mostrar área seleccionada como porcentaje
+            total_area = image_shape[0] * image_shape[1]
+            patch_area = patch_size * patch_size
+            percentage = (patch_area / total_area) * 100
             
-            if width < 64 or height < 64:
-                st.error("❌ El parche es muy pequeño (mínimo 64x64 px)")
+            st.info(f"📊 El parche representa el {percentage:.2f}% del área total de la imagen")
                 
         except Exception as e:
             logger.error(f"Error mostrando info de selección: {e}")
     
-    def _estimate_processing_time(self, num_steps: int) -> float:
-        """Estima tiempo de procesamiento basado en número de pasos"""
-        # Tiempo base por paso (estimado)
-        base_time_per_step = 2.0  # segundos
-        return num_steps * base_time_per_step
-    
-    def preview_patch(self, image: np.ndarray, coordinates: Dict[str, int], target_size: int) -> Optional[np.ndarray]:
+    def preview_patch(self, image: np.ndarray, coordinates: Dict[str, int]) -> Optional[np.ndarray]:
         """Genera vista previa del parche que será procesado"""
         try:
             x, y = coordinates["x"], coordinates["y"]
@@ -334,10 +347,6 @@ class PatchSelector:
             
             # Extraer parche
             patch = image[y:y+height, x:x+width]
-            
-            # Redimensionar al tamaño objetivo si es necesario
-            if patch.shape[0] != target_size or patch.shape[1] != target_size:
-                patch = cv2.resize(patch, (target_size, target_size))
             
             return patch
             

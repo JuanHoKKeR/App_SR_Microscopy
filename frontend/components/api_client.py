@@ -1,5 +1,5 @@
 """
-Cliente API para comunicación con el backend FastAPI
+Cliente API actualizado para comunicación con el backend FastAPI
 """
 
 import requests
@@ -16,6 +16,7 @@ class APIClient:
         self.base_url = base_url
         self.session = requests.Session()
         self.timeout = 60  # timeout en segundos
+        self._loaded_models_cache = None
     
     def check_connection(self) -> bool:
         """Verifica la conexión con la API"""
@@ -37,68 +38,35 @@ class APIClient:
             logger.error(f"Error obteniendo info de API: {e}")
             return None
     
-    def get_model_recommendations(self, architecture: str) -> Dict[str, Any]:
-        """Obtiene recomendaciones de configuración para una arquitectura"""
-        try:
-            arch_models = self.get_models_by_architecture(architecture)
-            
-            if not arch_models:
-                return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
-            
-            available_models = [m for m in arch_models["models"] if m["available"]]
-            
-            if not available_models:
-                return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
-            
-            # Calcular tamaños disponibles y escalas máximas
-            input_sizes = sorted(list(set([m["input_size"] for m in available_models])))
-            
-            # Calcular escala máxima posible
-            max_scale = 1
-            for start_size in input_sizes:
-                current_scale = 1
-                current_size = start_size
-                
-                while True:
-                    next_size = current_size * 2
-                    has_model = any(
-                        m["input_size"] == current_size and m["output_size"] == next_size 
-                        for m in available_models
-                    )
-                    
-                    if has_model:
-                        current_scale *= 2
-                        current_size = next_size
-                        max_scale = max(max_scale, current_scale)
-                    else:
-                        break
-            
-            # Tamaño recomendado (el más común o el medio)
-            recommended_start = input_sizes[len(input_sizes) // 2] if input_sizes else 256
-            
-            return {
-                "available_sizes": input_sizes,
-                "max_scale": max_scale,
-                "recommended_start": recommended_start,
-                "total_models": len(available_models),
-                "architecture": architecture
-            }
-        except Exception as e:
-            logger.error(f"Error obteniendo recomendaciones de modelo: {e}")
-            return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
-    
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Obtiene lista de modelos disponibles"""
         try:
             response = self.session.get(f"{self.base_url}/models", timeout=15)
             if response.status_code == 200:
-                return response.json()
+                models = response.json()
+                # Actualizar cache
+                self._loaded_models_cache = {m["name"]: m for m in models if m["available"]}
+                return models
             else:
                 logger.error(f"Error HTTP {response.status_code}: {response.text}")
                 return []
         except Exception as e:
             logger.error(f"Error obteniendo modelos: {e}")
             return []
+    
+    def is_model_loaded(self, model_name: str) -> bool:
+        """Verifica si un modelo está cargado"""
+        try:
+            # Usar cache si está disponible
+            if self._loaded_models_cache is not None:
+                return model_name in self._loaded_models_cache
+            
+            # Si no hay cache, obtener modelos
+            models = self.get_available_models()
+            return any(m["name"] == model_name and m["available"] for m in models)
+        except Exception as e:
+            logger.error(f"Error verificando modelo {model_name}: {e}")
+            return False
     
     def get_models_by_architecture(self, architecture: str) -> Optional[Dict[str, Any]]:
         """Obtiene modelos filtrados por arquitectura"""
@@ -221,7 +189,11 @@ class APIClient:
                 f"{self.base_url}/load_model/{model_name}",
                 timeout=30
             )
-            return response.status_code == 200
+            if response.status_code == 200:
+                # Invalidar cache
+                self._loaded_models_cache = None
+                return True
+            return False
         except Exception as e:
             logger.error(f"Error cargando modelo {model_name}: {e}")
             return False
@@ -233,7 +205,11 @@ class APIClient:
                 f"{self.base_url}/unload_model/{model_name}",
                 timeout=15
             )
-            return response.status_code == 200
+            if response.status_code == 200:
+                # Invalidar cache
+                self._loaded_models_cache = None
+                return True
+            return False
         except Exception as e:
             logger.error(f"Error descargando modelo {model_name}: {e}")
             return False
@@ -248,11 +224,6 @@ class APIClient:
         except Exception as e:
             logger.error(f"Error obteniendo estadísticas: {e}")
             return None
-    
-    @st.cache_data(ttl=30)  # Cache por 30 segundos
-    def get_cached_models(_self) -> List[Dict[str, Any]]:
-        """Versión cacheada de get_available_models"""
-        return _self.get_available_models()
     
     def validate_upsampling_feasibility(self, architecture: str, start_size: int, target_scale: int) -> tuple[bool, str]:
         """Valida si es posible realizar el upsampling solicitado"""
@@ -318,3 +289,62 @@ class APIClient:
         except Exception as e:
             logger.error(f"Error en evaluate_image_quality: {e}")
             return None
+    
+    def get_model_recommendations(self, architecture: str) -> Dict[str, Any]:
+        """Obtiene recomendaciones de configuración para una arquitectura"""
+        try:
+            arch_models = self.get_models_by_architecture(architecture)
+            
+            if not arch_models:
+                return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
+            
+            available_models = [m for m in arch_models["models"] if m["available"]]
+            
+            if not available_models:
+                return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
+            
+            # Calcular tamaños disponibles y escalas máximas
+            input_sizes = sorted(list(set([m["input_size"] for m in available_models])))
+            
+            # Calcular escala máxima posible
+            max_scale = 1
+            for start_size in input_sizes:
+                current_scale = 1
+                current_size = start_size
+                
+                while True:
+                    next_size = current_size * 2
+                    has_model = any(
+                        m["input_size"] == current_size and m["output_size"] == next_size 
+                        for m in available_models
+                    )
+                    
+                    if has_model:
+                        current_scale *= 2
+                        current_size = next_size
+                        max_scale = max(max_scale, current_scale)
+                    else:
+                        break
+            
+            # Tamaño recomendado (el más común o el medio)
+            recommended_start = input_sizes[len(input_sizes) // 2] if input_sizes else 256
+            
+            return {
+                "available_sizes": input_sizes,
+                "max_scale": max_scale,
+                "recommended_start": recommended_start,
+                "total_models": len(available_models),
+                "architecture": architecture
+            }
+        except Exception as e:
+            logger.error(f"Error obteniendo recomendaciones de modelo: {e}")
+            return {"available_sizes": [], "max_scale": 1, "recommended_start": 256}
+    
+    @st.cache_data(ttl=30)  # Cache por 30 segundos
+    def get_cached_models(_self) -> List[Dict[str, Any]]:
+        """Versión cacheada de get_available_models"""
+        return _self.get_available_models()
+    
+    def clear_model_cache(self):
+        """Limpia el cache de modelos"""
+        self._loaded_models_cache = None

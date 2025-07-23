@@ -1,5 +1,5 @@
 """
-Configuración de UI y estilos CSS para Streamlit
+Configuración de UI y estilos CSS para Streamlit actualizada
 """
 
 import streamlit as st
@@ -74,17 +74,19 @@ def load_custom_css():
 
     .metric-container {
         background: white;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        padding: 1.2rem;
+        border-radius: 0.8rem;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         text-align: center;
         margin: 0.5rem 0;
+        border: 1px solid #e0e0e0;
     }
 
     .metric-value {
         font-size: 1.8rem;
         font-weight: bold;
         color: #2E8B57;
+        margin-bottom: 0.5rem;
     }
 
     .metric-label {
@@ -100,16 +102,19 @@ def load_custom_css():
         padding: 1rem;
         margin: 0.5rem 0;
         text-align: center;
+        transition: all 0.3s ease;
     }
 
     .progress-step.active {
         background: #e3f2fd;
         border-color: #2196f3;
+        box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
     }
 
     .progress-step.completed {
         background: #e8f5e8;
         border-color: #4caf50;
+        box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
     }
 
     .canvas-container {
@@ -124,6 +129,10 @@ def load_custom_css():
         color: #666;
         font-style: italic;
         margin: 0.5rem 0;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 0.5rem;
+        border-left: 3px solid #4682B4;
     }
 
     .model-status-available {
@@ -139,7 +148,7 @@ def load_custom_css():
     .comparison-container {
         display: flex;
         justify-content: space-around;
-        align-items: center;
+        align-items: flex-start;
         gap: 1rem;
         margin: 1rem 0;
     }
@@ -156,6 +165,28 @@ def load_custom_css():
     .arrow-right {
         font-size: 2rem;
         color: #4682B4;
+        align-self: center;
+    }
+
+    /* Tabs personalizados */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f0f2f6;
+        border-radius: 8px;
+        gap: 8px;
+        padding-left: 12px;
+        padding-right: 12px;
+        font-weight: 500;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: #4682B4;
+        color: white;
     }
 
     /* Animaciones */
@@ -184,17 +215,22 @@ def load_custom_css():
         }
     }
 
-    /* Ocultar elementos de Streamlit */
-    .css-1d391kg {
-        padding-top: 1rem;
+    /* Mejorar file uploader */
+    .stFileUploader > div {
+        border: 2px dashed #4682B4;
+        border-radius: 0.75rem;
+        background: #f8f9fa;
+        transition: all 0.3s ease;
+        padding: 2rem;
     }
 
-    .css-k1vhr4 {
-        margin-top: -75px;
+    .stFileUploader > div:hover {
+        border-color: #2E8B57;
+        background: #f0f8ff;
     }
 
-    /* Botones personalizados */
-    .stButton > button {
+    /* Mejoras para botones */
+    .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, #4682B4 0%, #2E8B57 100%);
         color: white;
         border: none;
@@ -205,7 +241,7 @@ def load_custom_css():
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 
-    .stButton > button:hover {
+    .stButton > button[kind="primary"]:hover {
         transform: translateY(-1px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.15);
     }
@@ -217,17 +253,36 @@ def load_custom_css():
         border-radius: 0.5rem;
     }
 
-    /* File uploader personalizado */
-    .stFileUploader > div {
-        border: 2px dashed #4682B4;
-        border-radius: 0.75rem;
+    /* Expander personalizado */
+    .streamlit-expanderHeader {
         background: #f8f9fa;
-        transition: all 0.3s ease;
+        border-radius: 0.5rem;
+        border: 1px solid #e9ecef;
     }
-
-    .stFileUploader > div:hover {
-        border-color: #2E8B57;
-        background: #f0f8ff;
+    
+    /* Mejorar las columnas proporcionales */
+    .proportional-original {
+        max-width: 300px;
+    }
+    
+    .proportional-enhanced {
+        flex: 2;
+    }
+    
+    /* CSS para métricas mejoradas */
+    .quality-metric-excellent {
+        border-left: 4px solid #4CAF50;
+        background: linear-gradient(135deg, #E8F5E8 0%, #F0FFF0 100%);
+    }
+    
+    .quality-metric-good {
+        border-left: 4px solid #FF9800;
+        background: linear-gradient(135deg, #FFF3E0 0%, #FFFAF0 100%);
+    }
+    
+    .quality-metric-poor {
+        border-left: 4px solid #F44336;
+        background: linear-gradient(135deg, #FFEBEE 0%, #FFF0F0 100%);
     }
     </style>
     """, unsafe_allow_html=True)
@@ -243,10 +298,14 @@ def show_info_box(message: str, box_type: str = "info"):
     elif box_type == "warning":
         st.markdown(f'<div class="warning-box">{message}</div>', unsafe_allow_html=True)
 
-def show_metric_card(value: str, label: str):
+def show_metric_card(value: str, label: str, quality_level: str = None):
     """Muestra una tarjeta de métrica personalizada"""
+    quality_class = ""
+    if quality_level:
+        quality_class = f"quality-metric-{quality_level}"
+    
     st.markdown(f"""
-    <div class="metric-container">
+    <div class="metric-container {quality_class}">
         <div class="metric-value">{value}</div>
         <div class="metric-label">{label}</div>
     </div>
@@ -276,22 +335,86 @@ def show_progress_steps(steps: list, current_step: int = 0):
     st.markdown('</div>', unsafe_allow_html=True)
 
 def show_comparison_layout(original_title: str, enhanced_title: str, 
-                         original_image, enhanced_image):
-    """Layout de comparación de imágenes"""
-    st.markdown("""
+                         original_image, enhanced_image, scale_factor: int = 2):
+    """Layout de comparación de imágenes con tamaños proporcionales"""
+    st.markdown(f"""
     <div class="comparison-container">
         <div class="comparison-item">
-            <h4>""" + original_title + """</h4>
+            <h4>{original_title}</h4>
         </div>
         <div class="arrow-right">→</div>
         <div class="comparison-item">
-            <h4>""" + enhanced_title + """</h4>
+            <h4>{enhanced_title}</h4>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2 = st.columns(2)
+    # Crear columnas proporcionales al factor de escala
+    col_widths = [1, scale_factor] if scale_factor > 1 else [1, 1]
+    col1, col2 = st.columns(col_widths)
+    
     with col1:
         st.image(original_image, use_column_width=True)
     with col2:
         st.image(enhanced_image, use_column_width=True)
+
+def show_architecture_info(architecture: str):
+    """Muestra información específica de cada arquitectura"""
+    architecture_info = {
+        "ESRGAN": {
+            "description": "Enhanced Super-Resolution GAN especializada en histopatología",
+            "strengths": ["Detalles muy finos", "Texturas realistas", "Discriminador KimiaNet"],
+            "considerations": ["Tiempo de procesamiento mayor", "Puede generar artefactos en algunos casos"],
+            "best_for": "Imágenes que requieren alta fidelidad de textura"
+        },
+        "SwinIR": {
+            "description": "Swin Transformer para restauración de imágenes",
+            "strengths": ["Balance calidad/velocidad", "Preserva estructuras", "Eficiente en memoria"],
+            "considerations": ["Menos detalles finos que ESRGAN", "Requiere tamaños específicos"],
+            "best_for": "Procesamiento rápido con buena calidad"
+        },
+        "EDSR": {
+            "description": "Enhanced Deep Super-Resolution con arquitectura residual",
+            "strengths": ["Muy eficiente", "Resultados suaves", "Estable"],
+            "considerations": ["Puede ser menos detallado", "Tendencia a suavizar"],
+            "best_for": "Procesamiento rápido y estable"
+        }
+    }
+    
+    if architecture in architecture_info:
+        info = architecture_info[architecture]
+        
+        st.markdown(f"**📝 {info['description']}**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**✅ Fortalezas:**")
+            for strength in info['strengths']:
+                st.markdown(f"- {strength}")
+        
+        with col2:
+            st.markdown("**⚠️ Consideraciones:**")
+            for consideration in info['considerations']:
+                st.markdown(f"- {consideration}")
+        
+        st.markdown(f"**🎯 Mejor para:** {info['best_for']}")
+
+def show_processing_status(status: str, details: str = ""):
+    """Muestra estado de procesamiento"""
+    status_icons = {
+        "preparing": "📁",
+        "processing": "🔄",
+        "finalizing": "✨",
+        "completed": "✅",
+        "error": "❌"
+    }
+    
+    icon = status_icons.get(status, "ℹ️")
+    
+    st.markdown(f"""
+    <div class="info-box">
+        {icon} <strong>{status.title()}</strong>
+        {f"<br>{details}" if details else ""}
+    </div>
+    """, unsafe_allow_html=True)

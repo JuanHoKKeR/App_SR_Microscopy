@@ -1,6 +1,6 @@
 """
-Componente para visualización de resultados
-Maneja la presentación de imágenes procesadas y comparaciones
+Visualizador de resultados corregido
+Muestra imágenes en tamaños proporcionales y métricas correctas
 """
 
 import streamlit as st
@@ -11,32 +11,35 @@ from typing import Dict, Any, List, Optional
 import io
 import logging
 
-from .ui_config import show_comparison_layout, show_info_box, show_metric_card
+from .ui_config import show_info_box, show_metric_card
 
 logger = logging.getLogger(__name__)
 
 class ResultsViewer:
-    """Visualizador de resultados de superresolución"""
+    """Visualizador de resultados corregido"""
     
     def __init__(self):
         pass
     
-    def display_sequential_results(self, result: Dict[str, Any]):
-        """Muestra resultados de procesamiento secuencial"""
+    def display_scale_results(self, result: Dict[str, Any]):
+        """Muestra resultados de procesamiento por escala"""
         if not result or not result.get("success", False):
             st.error("❌ No hay resultados válidos para mostrar")
             return
         
         st.markdown('<h2 class="sub-header">🎉 Resultados del Procesamiento</h2>', unsafe_allow_html=True)
         
-        # Resumen de procesamiento
+        # Resumen del procesamiento
         self._show_processing_summary(result)
+        
+        # Comparación con tamaños proporcionales
+        self._show_proportional_comparison(result)
+        
+        # Métricas de calidad
+        self._show_quality_metrics_enhanced(result)
         
         # Progresión paso a paso
         self._show_step_progression(result)
-        
-        # Comparación final
-        self._show_final_comparison(result)
         
         # Opciones de descarga
         self._show_download_options(result)
@@ -45,18 +48,22 @@ class ResultsViewer:
         """Muestra resumen del procesamiento realizado"""
         st.markdown("### 📊 Resumen del Procesamiento")
         
+        # Obtener información de configuración
+        config = result.get("config", {})
+        selection = result.get("selection", {})
+        
         # Métricas principales
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             show_metric_card(
-                result.get("architecture", "N/A"),
+                config.get("architecture", result.get("architecture", "N/A")),
                 "Arquitectura"
             )
         
         with col2:
             show_metric_card(
-                f"×{result.get('target_scale', 'N/A')}",
+                f"×{config.get('target_scale', result.get('target_scale', 'N/A'))}",
                 "Factor de Escala"
             )
         
@@ -77,63 +84,13 @@ class ResultsViewer:
         # Información detallada
         show_info_box(f"""
         **🛤️ Ruta de procesamiento:** {' → '.join(result.get('upsampling_path', []))}<br>
-        **⏱️ Arquitectura utilizada:** {result.get('architecture', 'Desconocida')}<br>
-        **🎯 Escalado conseguido:** {result.get('target_scale', 'N/A')}x
+        **📍 Región procesada:** ({selection.get('x', 0)}, {selection.get('y', 0)}) - {selection.get('width', 0)}×{selection.get('height', 0)} px<br>
+        **🎯 Escalado conseguido:** {config.get('target_scale', result.get('target_scale', 'N/A'))}x
         """, "success")
     
-    def _show_step_progression(self, result: Dict[str, Any]):
-        """Muestra la progresión paso a paso del procesamiento"""
-        st.markdown("### 🔄 Progresión Paso a Paso")
-        
-        steps = result.get("steps", [])
-        if not steps:
-            st.warning("No hay información de pasos disponible")
-            return
-        
-        # Mostrar pasos en tabs para mejor organización
-        if len(steps) <= 4:
-            # Si hay pocos pasos, usar columnas
-            cols = st.columns(len(steps))
-            for i, step in enumerate(steps):
-                with cols[i]:
-                    self._show_single_step(step, i + 1)
-        else:
-            # Si hay muchos pasos, usar tabs
-            tab_names = [f"Paso {step['step']}" for step in steps]
-            tabs = st.tabs(tab_names)
-            
-            for i, (tab, step) in enumerate(zip(tabs, steps)):
-                with tab:
-                    self._show_single_step(step, i + 1, detailed=True)
-    
-    def _show_single_step(self, step: Dict[str, Any], step_number: int, detailed: bool = False):
-        """Muestra un paso individual del procesamiento"""
-        st.markdown(f"**Paso {step_number}**")
-        st.markdown(f"*{step.get('model_name', 'Modelo desconocido')}*")
-        
-        # Mostrar imagen del paso
-        if "enhanced_patch" in step:
-            image_data = self._base64_to_image(step["enhanced_patch"])
-            if image_data is not None:
-                st.image(image_data, 
-                        caption=f"{step.get('output_size', 'N/A')}",
-                        use_column_width=True)
-        
-        if detailed:
-            # Información adicional en modo detallado
-            st.markdown(f"- **Entrada:** {step.get('input_size', 'N/A')}")
-            st.markdown(f"- **Salida:** {step.get('output_size', 'N/A')}")
-            
-            # Información del modelo si está disponible
-            model_config = step.get("model_config", {})
-            if model_config:
-                st.markdown(f"- **Tipo:** {model_config.get('type', 'N/A')}")
-                if 'checkpoint_iter' in model_config:
-                    st.markdown(f"- **Checkpoint:** {model_config['checkpoint_iter']}")
-    
-    def _show_final_comparison(self, result: Dict[str, Any]):
-        """Muestra comparación final entre original y resultado"""
-        st.markdown("### 🔍 Comparación Final")
+    def _show_proportional_comparison(self, result: Dict[str, Any]):
+        """Muestra comparación con tamaños proporcionales reales"""
+        st.markdown("### 🔍 Comparación con Tamaños Proporcionales")
         
         original_b64 = result.get("original_patch")
         final_b64 = result.get("final_result")
@@ -150,181 +107,211 @@ class ResultsViewer:
             st.error("❌ Error cargando imágenes para comparación")
             return
         
-        # Layout de comparación
-        show_comparison_layout(
-            "Imagen Original",
-            f"Resultado (x{result.get('target_scale', 'N/A')})",
-            original_img,
-            final_img
-        )
+        # Obtener dimensiones reales
+        config = result.get("config", {})
+        target_scale = config.get("target_scale", result.get("target_scale", 2))
         
-        # Información de calidad (si está disponible)
-        self._show_quality_metrics(result)
-    
-    def _show_quality_metrics(self, result: Dict[str, Any]):
-        """Muestra métricas de calidad si están disponibles"""
-        quality_metrics = result.get("quality_metrics")
+        # Layout de comparación con tamaños proporcionales
+        col1, col2 = st.columns([1, target_scale])  # Columnas proporcionales al factor de escala
         
-        if quality_metrics and "error" not in quality_metrics:
-            st.markdown("### 📈 Métricas de Calidad")
-            
-            # Métricas principales
-            col1, col2, col3 = st.columns(3)
-            
-            metrics = quality_metrics.get("metrics") or quality_metrics
-            interpretation = quality_metrics.get("interpretation", {})
-            
-            with col1:
-                psnr_val = metrics.get("psnr", -1)
-                if psnr_val > 0:
-                    show_metric_card(
-                        f"{psnr_val:.2f} dB",
-                        f"PSNR - {interpretation.get('psnr', 'N/A')}"
-                    )
-            
-            with col2:
-                ssim_val = metrics.get("ssim", -1)
-                if ssim_val > 0:
-                    show_metric_card(
-                        f"{ssim_val:.4f}",
-                        f"SSIM - {interpretation.get('ssim', 'N/A')}"
-                    )
-            
-            with col3:
-                perceptual_val = metrics.get("perceptual_index", -1)
-                if perceptual_val >= 0:
-                    show_metric_card(
-                        f"{perceptual_val:.6f}",
-                        f"Índice Perceptual - {interpretation.get('perceptual', 'N/A')}"
-                    )
+        with col1:
+            st.markdown("#### 📷 Imagen Original")
+            st.image(original_img, caption=f"Original: {original_img.size[0]}×{original_img.size[1]} px")
             
             # Información adicional
-            kimianet_used = quality_metrics.get("kimianet_used", False)
-            if kimianet_used:
-                show_info_box("""
-                🧠 **KimiaNet Utilizado:** Las métricas perceptuales se calcularon usando DenseNet121 
-                con pesos KimiaNet, específicamente entrenado para imágenes de histopatología.
-                """, "success")
-            else:
-                show_info_box("""
-                ⚠️ **KimiaNet No Disponible:** Las métricas PSNR y SSIM están disponibles, 
-                pero el índice perceptual no se pudo calcular sin KimiaNet.
-                """, "warning")
-            
-            # Explicación de métricas
-            with st.expander("ℹ️ Explicación de Métricas"):
-                st.markdown("""
-                **PSNR (Peak Signal-to-Noise Ratio):**
-                - Mide la relación entre señal y ruido
-                - Valores más altos = mejor calidad
-                - Típico: 20-35 dB para super-resolución
-                
-                **SSIM (Structural Similarity Index):**
-                - Mide similitud estructural percibida
-                - Rango: 0-1, valores más altos = mejor
-                - Considera luminancia, contraste y estructura
-                
-                **Índice Perceptual (KimiaNet):**
-                - Distancia en espacio de características KimiaNet
-                - Valores más bajos = mayor similitud perceptual
-                - Específicamente entrenado para histopatología
-                """)
+            st.markdown(f"""
+            **Tamaño real:** {original_img.size[0]} × {original_img.size[1]} píxeles  
+            **Área:** {original_img.size[0] * original_img.size[1]:,} píxeles²
+            """)
         
-        elif quality_metrics and "error" in quality_metrics:
+        with col2:
+            st.markdown(f"#### 🚀 Resultado (×{target_scale})")
+            st.image(final_img, caption=f"Procesado: {final_img.size[0]}×{final_img.size[1]} px")
+            
+            # Información adicional
+            gain_factor = (final_img.size[0] * final_img.size[1]) / (original_img.size[0] * original_img.size[1])
+            st.markdown(f"""
+            **Tamaño real:** {final_img.size[0]} × {final_img.size[1]} píxeles  
+            **Área:** {final_img.size[0] * final_img.size[1]:,} píxeles²  
+            **Ganancia:** {gain_factor:.1f}× más píxeles
+            """)
+        
+        # Mostrar diferencia visual de tamaño
+        st.markdown("#### 📏 Comparación Visual de Tamaño")
+        st.markdown("""
+        💡 **Nota:** Las columnas están dimensionadas proporcionalmente al factor de escala 
+        para mostrar la diferencia real de tamaño entre las imágenes.
+        """)
+    
+    def _show_quality_metrics_enhanced(self, result: Dict[str, Any]):
+        """Muestra métricas de calidad mejoradas"""
+        quality_metrics = result.get("quality_metrics")
+        
+        if not quality_metrics:
+            st.markdown("### 📈 Métricas de Calidad")
+            st.info("ℹ️ No se calcularon métricas de calidad para este procesamiento")
+            return
+        
+        if "error" in quality_metrics:
             show_info_box(f"""
             ⚠️ **Error en evaluación de calidad:** {quality_metrics['error']}<br>
             Las métricas de calidad no están disponibles para este resultado.
             """, "warning")
-        
-        else:
-            # Placeholder para métricas futuras si no hay métricas
-            with st.expander("📈 Métricas de Calidad (No disponibles)"):
-                st.info("""
-                🚧 **Para obtener métricas de calidad:**
-                - Habilita "Evaluar Calidad" en la configuración
-                - Asegúrate de que KimiaNet esté disponible
-                - Las métricas incluyen PSNR, SSIM e Índice Perceptual
-                """)
-                
-                # Botón para verificar KimiaNet
-                if st.button("🔍 Verificar Estado de KimiaNet"):
-                    # Esto se puede implementar para hacer una llamada a la API
-                    st.info("Verificando estado de KimiaNet...")
-    
-    def show_quality_comparison(self, results: List[Dict[str, Any]]):
-        """Compara métricas de calidad entre diferentes resultados"""
-        st.markdown("### ⚖️ Comparación de Calidad")
-        
-        # Filtrar resultados que tienen métricas de calidad
-        results_with_metrics = [
-            r for r in results 
-            if r.get("quality_metrics") and "error" not in r.get("quality_metrics", {})
-        ]
-        
-        if len(results_with_metrics) < 2:
-            st.info("Se necesitan al menos 2 resultados con métricas de calidad para comparar")
             return
         
-        # Crear tabla comparativa
-        comparison_data = []
-        for result in results_with_metrics:
-            metrics = result.get("quality_metrics", {}).get("metrics") or result.get("quality_metrics", {})
-            
-            comparison_data.append({
-                "Arquitectura": result.get("architecture", "N/A"),
-                "Escala": f"x{result.get('target_scale', 'N/A')}",
-                "PSNR (dB)": f"{metrics.get('psnr', -1):.2f}" if metrics.get('psnr', -1) > 0 else "N/A",
-                "SSIM": f"{metrics.get('ssim', -1):.4f}" if metrics.get('ssim', -1) > 0 else "N/A",
-                "Índice Perceptual": f"{metrics.get('perceptual_index', -1):.6f}" if metrics.get('perceptual_index', -1) >= 0 else "N/A"
-            })
+        st.markdown("### 📈 Métricas de Calidad")
         
-        # Mostrar tabla
-        import pandas as pd
-        df = pd.DataFrame(comparison_data)
-        st.dataframe(df, use_container_width=True)
+        # Métricas principales
+        col1, col2, col3 = st.columns(3)
         
-        # Análisis automático
-        if len(comparison_data) > 1:
-            st.markdown("**🏆 Análisis Automático:**")
+        metrics = quality_metrics.get("metrics") or quality_metrics
+        interpretation = quality_metrics.get("interpretation", {})
+        
+        with col1:
+            psnr_val = metrics.get("psnr", -1)
+            if psnr_val > 0:
+                # Determinar color basado en calidad
+                if psnr_val > 30:
+                    psnr_color = "🟢"
+                elif psnr_val > 25:
+                    psnr_color = "🟡"
+                else:
+                    psnr_color = "🔴"
+                
+                st.markdown(f"""
+                <div class="metric-container">
+                    <div class="metric-value">{psnr_color} {psnr_val:.2f} dB</div>
+                    <div class="metric-label">PSNR - {interpretation.get('psnr', 'N/A')}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        with col2:
+            ssim_val = metrics.get("ssim", -1)
+            if ssim_val > 0:
+                # Determinar color basado en calidad
+                if ssim_val > 0.9:
+                    ssim_color = "🟢"
+                elif ssim_val > 0.7:
+                    ssim_color = "🟡"
+                else:
+                    ssim_color = "🔴"
+                
+                st.markdown(f"""
+                <div class="metric-container">
+                    <div class="metric-value">{ssim_color} {ssim_val:.4f}</div>
+                    <div class="metric-label">SSIM - {interpretation.get('ssim', 'N/A')}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        with col3:
+            perceptual_val = metrics.get("perceptual_index", -1)
+            if perceptual_val >= 0:
+                # Determinar color basado en calidad (menor es mejor para perceptual)
+                if perceptual_val < 0.001:
+                    perc_color = "🟢"
+                elif perceptual_val < 0.01:
+                    perc_color = "🟡"
+                else:
+                    perc_color = "🔴"
+                
+                st.markdown(f"""
+                <div class="metric-container">
+                    <div class="metric-value">{perc_color} {perceptual_val:.6f}</div>
+                    <div class="metric-label">Índice Perceptual - {interpretation.get('perceptual', 'N/A')}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Información sobre KimiaNet
+        kimianet_used = quality_metrics.get("kimianet_used", False)
+        if kimianet_used:
+            show_info_box("""
+            🧠 **KimiaNet Utilizado:** Las métricas perceptuales se calcularon usando DenseNet121 
+            con pesos KimiaNet, específicamente entrenado para imágenes de histopatología de cáncer de mama.
+            Esto proporciona una evaluación más relevante para tu dominio específico.
+            """, "success")
+        else:
+            show_info_box("""
+            ⚠️ **KimiaNet No Disponible:** Las métricas PSNR y SSIM están disponibles, 
+            pero el índice perceptual especializado no se pudo calcular.
+            """, "warning")
+        
+        # Interpretación detallada
+        with st.expander("📚 Interpretación de Métricas"):
+            st.markdown("""
+            **PSNR (Peak Signal-to-Noise Ratio):**
+            - 🟢 > 30 dB: Excelente calidad, diferencias imperceptibles
+            - 🟡 25-30 dB: Buena calidad, diferencias mínimas
+            - 🔴 < 25 dB: Calidad aceptable pero con artefactos visibles
             
-            # Encontrar mejores valores
-            best_psnr = max([float(d["PSNR (dB)"].replace(" dB", "")) for d in comparison_data if d["PSNR (dB)"] != "N/A"])
-            best_ssim = max([float(d["SSIM"]) for d in comparison_data if d["SSIM"] != "N/A"])
+            **SSIM (Structural Similarity Index):**
+            - 🟢 > 0.9: Excelente preservación de estructura
+            - 🟡 0.7-0.9: Buena preservación de estructura  
+            - 🔴 < 0.7: Pérdida notable de estructura
             
-            best_psnr_arch = next(d["Arquitectura"] for d in comparison_data if d["PSNR (dB)"] != "N/A" and float(d["PSNR (dB)"].replace(" dB", "")) == best_psnr)
-            best_ssim_arch = next(d["Arquitectura"] for d in comparison_data if d["SSIM"] != "N/A" and float(d["SSIM"]) == best_ssim)
+            **Índice Perceptual (KimiaNet):**
+            - 🟢 < 0.001: Excelente similitud perceptual
+            - 🟡 0.001-0.01: Buena similitud perceptual
+            - 🔴 > 0.01: Diferencias perceptuales notables
             
-            st.markdown(f"- **Mejor PSNR:** {best_psnr_arch} ({best_psnr:.2f} dB)")
-            st.markdown(f"- **Mejor SSIM:** {best_ssim_arch} ({best_ssim:.4f})")
-            
-            # Análisis perceptual si está disponible
-            perceptual_values = [float(d["Índice Perceptual"]) for d in comparison_data if d["Índice Perceptual"] != "N/A"]
-            if perceptual_values:
-                best_perceptual = min(perceptual_values)  # Menor es mejor
-                best_perceptual_arch = next(d["Arquitectura"] for d in comparison_data if d["Índice Perceptual"] != "N/A" and float(d["Índice Perceptual"]) == best_perceptual)
-                st.markdown(f"- **Mejor Índice Perceptual:** {best_perceptual_arch} ({best_perceptual:.6f})")
+            💡 **Para histopatología de cáncer de mama**, el índice perceptual KimiaNet 
+            es especialmente relevante ya que evalúa características específicas del dominio.
+            """)
     
-    def show_kimianet_info(self):
-        """Muestra información sobre KimiaNet"""
-        st.markdown("### 🧠 Acerca de KimiaNet")
+    def _show_step_progression(self, result: Dict[str, Any]):
+        """Muestra la progresión paso a paso del procesamiento"""
+        st.markdown("### 🔄 Progresión Paso a Paso")
         
-        show_info_box("""
-        **KimiaNet** es una red neuronal convolucional pre-entrenada específicamente para 
-        imágenes de histopatología. Utiliza la arquitectura DenseNet121 y ha sido entrenada 
-        en un gran dataset de imágenes médicas para extraer características relevantes 
-        para el análisis de tejidos.
+        steps = result.get("steps", [])
+        if not steps:
+            st.warning("No hay información de pasos disponible")
+            return
         
-        **En esta aplicación:**
-        - Se usa para calcular un índice perceptual especializado
-        - Evalúa la similitud entre imágenes en el espacio de características médicas
-        - Proporciona una métrica más relevante que PSNR/SSIM para histopatología
-        """, "info")
+        # Mostrar pasos en columnas si son pocos, tabs si son muchos
+        if len(steps) <= 3:
+            cols = st.columns(len(steps))
+            for i, step in enumerate(steps):
+                with cols[i]:
+                    self._show_single_step(step, i + 1)
+        else:
+            # Usar tabs para muchos pasos
+            tab_names = [f"Paso {step['step']}" for step in steps]
+            tabs = st.tabs(tab_names)
+            
+            for tab, step in zip(tabs, steps):
+                with tab:
+                    self._show_single_step(step, step['step'], detailed=True)
+    
+    def _show_single_step(self, step: Dict[str, Any], step_number: int, detailed: bool = False):
+        """Muestra un paso individual del procesamiento"""
+        st.markdown(f"**Paso {step_number}: {step.get('model_name', 'Modelo desconocido')}**")
+        
+        # Mostrar imagen del paso
+        if "enhanced_patch" in step:
+            image_data = self._base64_to_image(step["enhanced_patch"])
+            if image_data is not None:
+                st.image(image_data, 
+                        caption=f"Salida: {step.get('output_size', 'N/A')}",
+                        use_column_width=True)
+        
+        if detailed:
+            # Información adicional en modo detallado
+            st.markdown(f"- **Entrada:** {step.get('input_size', 'N/A')}")
+            st.markdown(f"- **Salida:** {step.get('output_size', 'N/A')}")
+            
+            # Información del modelo si está disponible
+            model_config = step.get("model_config", {})
+            if model_config:
+                st.markdown(f"- **Tipo:** {model_config.get('type', 'N/A')}")
+                if 'checkpoint_iter' in model_config:
+                    st.markdown(f"- **Checkpoint:** {model_config['checkpoint_iter']}")
     
     def _show_download_options(self, result: Dict[str, Any]):
         """Muestra opciones de descarga"""
         st.markdown("### 💾 Opciones de Descarga")
         
         col1, col2, col3 = st.columns(3)
+        
+        config = result.get("config", {})
         
         with col1:
             # Descargar resultado final
@@ -334,7 +321,7 @@ class ResultsViewer:
                     st.download_button(
                         label="📥 Descargar Resultado Final",
                         data=final_bytes,
-                        file_name=f"enhanced_x{result.get('target_scale', 'N')}_{result.get('architecture', 'unknown').lower()}.png",
+                        file_name=f"enhanced_x{config.get('target_scale', 'N')}_{config.get('architecture', 'unknown').lower()}.png",
                         mime="image/png",
                         type="primary"
                     )
@@ -352,9 +339,78 @@ class ResultsViewer:
                     )
         
         with col3:
-            # Descargar reporte (futuro)
-            if st.button("📄 Generar Reporte", help="Próximamente disponible"):
-                st.info("🚧 Función de reporte en desarrollo")
+            # Generar reporte de métricas
+            if result.get("quality_metrics"):
+                report_text = self._generate_metrics_report(result)
+                st.download_button(
+                    label="📄 Descargar Reporte",
+                    data=report_text,
+                    file_name="quality_report.txt",
+                    mime="text/plain"
+                )
+    
+    def _generate_metrics_report(self, result: Dict[str, Any]) -> str:
+        """Genera reporte de texto con las métricas"""
+        config = result.get("config", {})
+        metrics = result.get("quality_metrics", {}).get("metrics", {})
+        
+        report_lines = [
+            "=== REPORTE DE SUPER-RESOLUCIÓN ===",
+            f"Fecha: {self._get_current_timestamp()}",
+            "",
+            "CONFIGURACIÓN:",
+            f"- Arquitectura: {config.get('architecture', 'N/A')}",
+            f"- Factor de escala: ×{config.get('target_scale', 'N/A')}",
+            f"- Tamaño de parche: {config.get('patch_size', 'N/A')}×{config.get('patch_size', 'N/A')} px",
+            f"- Modelos utilizados: {len(result.get('upsampling_path', []))} pasos",
+            "",
+            "MÉTRICAS DE CALIDAD:",
+            f"- PSNR: {metrics.get('psnr', 'N/A'):.4f} dB",
+            f"- SSIM: {metrics.get('ssim', 'N/A'):.6f}",
+            f"- Índice Perceptual: {metrics.get('perceptual_index', 'N/A'):.8f}",
+            "",
+            "PROCESAMIENTO:",
+            f"- Ruta: {' → '.join(result.get('upsampling_path', []))}",
+            f"- Resolución inicial: {result.get('original_size', 'N/A')}",
+            f"- Resolución final: {result.get('final_size', 'N/A')}",
+        ]
+        
+        return "\n".join(report_lines)
+    
+    def display_evaluation_results(self, result: Dict[str, Any], show_difference_map: bool = False):
+        """Muestra resultados de evaluación independiente"""
+        st.markdown("### 📊 Resultados de Evaluación")
+        
+        if not result.get("success", False):
+            st.error("❌ Error en la evaluación")
+            return
+        
+        # Mostrar métricas principales
+        metrics = result.get("metrics", {})
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            psnr = metrics.get("psnr", 0)
+            show_metric_card(f"{psnr:.2f} dB", "PSNR")
+        
+        with col2:
+            ssim = metrics.get("ssim", 0)
+            show_metric_card(f"{ssim:.4f}", "SSIM")
+        
+        with col3:
+            perceptual = metrics.get("perceptual_index", -1)
+            if perceptual >= 0:
+                show_metric_card(f"{perceptual:.6f}", "Índice Perceptual")
+            else:
+                show_metric_card("N/A", "Índice Perceptual")
+        
+        # Interpretación
+        interpretation = result.get("interpretation", {})
+        if interpretation:
+            st.markdown("**Interpretación:**")
+            for metric, interp in interpretation.items():
+                st.markdown(f"- **{metric.upper()}:** {interp}")
     
     def _base64_to_image(self, base64_str: str) -> Optional[Image.Image]:
         """Convierte base64 a imagen PIL"""
@@ -373,82 +429,6 @@ class ResultsViewer:
         except Exception as e:
             logger.error(f"Error convirtiendo base64 a bytes: {e}")
             return None
-    
-    def show_processing_comparison(self, results: List[Dict[str, Any]]):
-        """Compara resultados de diferentes arquitecturas"""
-        st.markdown("### ⚖️ Comparación de Arquitecturas")
-        
-        if len(results) < 2:
-            st.info("Necesitas al menos 2 resultados para comparar")
-            return
-        
-        # Crear tabs para cada resultado
-        tab_names = [f"{r.get('architecture', 'N/A')} (x{r.get('target_scale', 'N')})" for r in results]
-        tabs = st.tabs(tab_names)
-        
-        for tab, result in zip(tabs, results):
-            with tab:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    if "final_result" in result:
-                        final_img = self._base64_to_image(result["final_result"])
-                        if final_img:
-                            st.image(final_img, 
-                                   caption=f"Resultado {result.get('architecture', 'N/A')}",
-                                   use_column_width=True)
-                
-                with col2:
-                    # Información del procesamiento
-                    st.markdown("**📊 Información:**")
-                    st.markdown(f"- **Arquitectura:** {result.get('architecture', 'N/A')}")
-                    st.markdown(f"- **Escala:** ×{result.get('target_scale', 'N/A')}")
-                    st.markdown(f"- **Pasos:** {len(result.get('steps', []))}")
-                    st.markdown(f"- **Resolución:** {result.get('final_size', 'N/A')}")
-    
-    def show_batch_results(self, batch_results: List[Dict[str, Any]]):
-        """Muestra resultados de procesamiento en lotes"""
-        st.markdown("### 📦 Resultados del Lote")
-        
-        # Resumen del lote
-        successful = sum(1 for r in batch_results if r.get("success", False))
-        total = len(batch_results)
-        
-        show_info_box(f"""
-        **📊 Resumen del lote:**<br>
-        - Procesados exitosamente: {successful}/{total}<br>
-        - Tasa de éxito: {(successful/total)*100:.1f}%
-        """, "success" if successful == total else "warning")
-        
-        # Mostrar cada resultado
-        for i, result in enumerate(batch_results):
-            with st.expander(f"Imagen {i+1} - {'✅ Exitoso' if result.get('success') else '❌ Error'}"):
-                if result.get("success"):
-                    self.display_sequential_results(result)
-                else:
-                    st.error(f"Error: {result.get('error', 'Error desconocido')}")
-    
-    def export_comparison_report(self, results: List[Dict[str, Any]]) -> str:
-        """Genera reporte de comparación en formato texto"""
-        report_lines = [
-            "# Reporte de Comparación de Super-Resolución",
-            f"Generado en: {self._get_current_timestamp()}",
-            "",
-            "## Resumen"
-        ]
-        
-        for i, result in enumerate(results):
-            report_lines.extend([
-                f"### Resultado {i+1}",
-                f"- Arquitectura: {result.get('architecture', 'N/A')}",
-                f"- Factor de escala: ×{result.get('target_scale', 'N/A')}",
-                f"- Pasos aplicados: {len(result.get('steps', []))}",
-                f"- Resolución final: {result.get('final_size', 'N/A')}",
-                f"- Ruta de procesamiento: {' → '.join(result.get('upsampling_path', []))}",
-                ""
-            ])
-        
-        return "\n".join(report_lines)
     
     def _get_current_timestamp(self) -> str:
         """Obtiene timestamp actual"""
