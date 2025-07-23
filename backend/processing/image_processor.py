@@ -9,8 +9,8 @@ import torch
 import tensorflow as tf
 import logging
 from typing import Tuple, Optional, Dict, Any, List
-from ..models.loader import model_loader
-from ..models.config import get_upsampling_path
+from models.loader import model_loader
+from models.config import get_upsampling_path
 
 logger = logging.getLogger(__name__)
 

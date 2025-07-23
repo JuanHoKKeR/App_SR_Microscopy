@@ -10,3 +10,7 @@ models/**/variables/**
 frontend/venv-front
 
 backend/venv-backend
+
+Imagenes_Test/
+
+/**/__pycache__/*

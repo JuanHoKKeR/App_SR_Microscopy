@@ -7,7 +7,7 @@ import streamlit as st
 import time
 import base64
 import io
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 import logging
 
 from .api_client import APIClient

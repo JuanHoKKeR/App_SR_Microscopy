@@ -4,7 +4,7 @@ Cliente API para comunicación con el backend FastAPI
 
 import requests
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import streamlit as st
 
 logger = logging.getLogger(__name__)
