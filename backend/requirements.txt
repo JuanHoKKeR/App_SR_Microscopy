@@ -23,6 +23,8 @@ basicsr==1.4.2
 requests==2.31.0
 pandas==2.1.4
 matplotlib==3.8.2
+numpy
+seaborn
 
 # Logging y configuración
 python-dotenv==1.0.0
