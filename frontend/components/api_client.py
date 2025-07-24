@@ -348,3 +348,58 @@ class APIClient:
     def clear_model_cache(self):
         """Limpia el cache de modelos"""
         self._loaded_models_cache = None
+        
+    def process_full_image(self,
+                        image_file,
+                        target_scale: int,
+                        architecture: str,
+                        strategy_type: str = "automatic",
+                        patch_size: int = 256,
+                        overlap: int = 32,
+                        evaluate_quality: bool = False) -> Optional[Dict[str, Any]]:
+        """Procesa imagen completa con estrategia automática o manual"""
+        try:
+            if hasattr(image_file, 'seek'):
+                image_file.seek(0)
+            
+            files = {"file": ("image.png", image_file, "image/png")}
+            data = {
+                "target_scale": target_scale,
+                "architecture": architecture,
+                "strategy_type": strategy_type,
+                "patch_size": patch_size,
+                "overlap": overlap,
+                "evaluate_quality": evaluate_quality
+            }
+            
+            response = self.session.post(
+                f"{self.base_url}/process_full_image",
+                files=files,
+                data=data,
+                timeout=self.timeout * 3  # Más tiempo para imagen completa
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Error procesando imagen completa: HTTP {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error en process_full_image: {e}")
+            return None
+
+    def get_processing_strategies(self, width: int, height: int, 
+                                target_scale: int, architecture: str) -> Optional[Dict[str, Any]]:
+        """Obtiene estrategias de procesamiento disponibles"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/processing_strategies/{width}/{height}/{target_scale}/{architecture}",
+                timeout=10
+            )
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            logger.error(f"Error obteniendo estrategias: {e}")
+            return None

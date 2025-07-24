@@ -135,6 +135,67 @@ def show_model_status_sidebar(api_client):
             
             if st.button("❌ Cerrar detalles"):
                 st.session_state.show_model_details = False
+                
+                
+def handle_full_image_mode(api_client, available_models, architecture):
+    """Maneja el modo de imagen completa"""
+    st.markdown('<h2 class="sub-header">🖼️ Procesamiento de Imagen Completa</h2>', unsafe_allow_html=True)
+    
+    # Importar componente
+    from components.full_image_processor import FullImageProcessor
+    from components.results_viewer import ResultsViewer
+    
+    # Inicializar procesador
+    full_processor = FullImageProcessor(api_client)
+    results_viewer = ResultsViewer()
+    
+    # Sección de carga de imagen
+    image_data, uploaded_file = full_processor.show_image_upload_section()
+    
+    if image_data is not None and uploaded_file is not None:
+        # Configuración de procesamiento
+        config = full_processor.show_processing_configuration(
+            image_data.shape, available_models, architecture
+        )
+        
+        if config is not None:
+            # Vista previa del procesamiento
+            full_processor.show_processing_preview(config, image_data.shape)
+            
+            # Botón de procesamiento
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                process_button = st.button(
+                    "🚀 Procesar Imagen Completa",
+                    type="primary",
+                    use_container_width=True
+                )
+            
+            # Procesar si se hace clic
+            if process_button:
+                result = full_processor.process_image(uploaded_file, config)
+                
+                if result and result.get("success"):
+                    # Mostrar resultados
+                    st.markdown("---")
+                    results_viewer.display_full_image_results(result)
+                else:
+                    st.error("❌ Error en el procesamiento de la imagen")
+    
+    else:
+        # Información sobre la funcionalidad
+        show_info_box("""
+        **🖼️ Procesamiento de Imagen Completa**<br><br>
+        Esta funcionalidad permite procesar imágenes completas de cualquier tamaño usando:<br>
+        • **Estrategia automática**: El sistema elige la mejor forma de procesar<br>
+        • **Imagen completa**: Para imágenes pequeñas (recomendado <1024px)<br>
+        • **División en parches**: Para imágenes grandes con reconstrucción inteligente<br><br>
+        **Ventajas:**<br>
+        • Manejo automático de imágenes grandes<br>
+        • Reconstrucción suave sin artefactos<br>
+        • Múltiples estrategias según el tamaño<br>
+        • Escalado hasta 16x con múltiples modelos
+        """, "info")
 
 if __name__ == "__main__":
     main()

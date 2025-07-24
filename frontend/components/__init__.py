@@ -13,6 +13,8 @@ from .ui_config import (
 
 from .api_client import APIClient
 
+from .full_image_processor import FullImageProcessor
+
 __all__ = [
     'setup_page_config',
     'load_custom_css', 
@@ -20,5 +22,9 @@ __all__ = [
     'show_metric_card',
     'show_progress_steps',
     'show_comparison_layout',
-    'APIClient'
+    'APIClient',
+    'PatchSelector', 
+    'ImageProcessorUI',
+    'ResultsViewer',
+    'FullImageProcessor'
 ]

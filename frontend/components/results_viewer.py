@@ -434,3 +434,162 @@ class ResultsViewer:
         """Obtiene timestamp actual"""
         from datetime import datetime
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    def display_full_image_results(self, result: Dict[str, Any]):
+        """Muestra resultados de procesamiento de imagen completa"""
+        if not result or not result.get("success", False):
+            st.error("❌ No hay resultados válidos para mostrar")
+            return
+        
+        st.markdown('<h2 class="sub-header">🎉 Imagen Procesada Exitosamente</h2>', unsafe_allow_html=True)
+        
+        # Resumen de procesamiento
+        self._show_full_image_summary(result)
+        
+        # Comparación visual
+        self._show_full_image_comparison(result)
+        
+        # Métricas de calidad si están disponibles
+        if result.get("quality_metrics"):
+            self._show_quality_metrics(result)
+        
+        # Opciones de descarga
+        self._show_full_image_download_options(result)
+
+    def _show_full_image_summary(self, result: Dict[str, Any]):
+        """Muestra resumen del procesamiento de imagen completa"""
+        st.markdown("### 📊 Resumen del Procesamiento")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            show_metric_card(
+                result.get("architecture", "N/A"),
+                "Arquitectura"
+            )
+        
+        with col2:
+            show_metric_card(
+                f"×{result.get('target_scale', 'N/A')}",
+                "Factor de Escala"
+            )
+        
+        with col3:
+            strategy_names = {
+                "full_image": "Imagen Completa",
+                "patch_based": "División en Parches"
+            }
+            strategy = strategy_names.get(result.get("strategy", ""), "Desconocida")
+            show_metric_card(strategy, "Estrategia")
+        
+        with col4:
+            original_size = result.get("original_size", "N/A")
+            enhanced_size = result.get("enhanced_size", "N/A")
+            show_metric_card(
+                f"{original_size}→{enhanced_size}",
+                "Resolución"
+            )
+        
+        # Información adicional según estrategia
+        if result.get("strategy") == "patch_based":
+            patch_count = result.get("patch_count", 0)
+            show_info_box(f"""
+            **🧩 Procesamiento por Parches:**<br>
+            • Se dividió la imagen en **{patch_count} parches**<br>
+            • Cada parche fue procesado individualmente<br>
+            • Reconstrucción inteligente con suavizado de transiciones
+            """, "info")
+        else:
+            show_info_box(f"""
+            **🖼️ Procesamiento de Imagen Completa:**<br>
+            • La imagen fue procesada como una sola unidad<br>
+            • Arquitectura: **{result.get('architecture', 'N/A')}**<br>
+            • Factor de escala aplicado: **×{result.get('target_scale', 'N/A')}**
+            """, "success")
+
+    def _show_full_image_comparison(self, result: Dict[str, Any]):
+        """Muestra comparación de imagen completa"""
+        st.markdown("### 🔍 Comparación Original vs Procesada")
+        
+        original_b64 = result.get("original_image")
+        enhanced_b64 = result.get("enhanced_image")
+        
+        if not original_b64 or not enhanced_b64:
+            st.error("❌ Imágenes de comparación no disponibles")
+            return
+        
+        # Convertir de base64 a imágenes
+        original_img = self._base64_to_image(original_b64)
+        enhanced_img = self._base64_to_image(enhanced_b64)
+        
+        if original_img is None or enhanced_img is None:
+            st.error("❌ Error cargando imágenes para comparación")
+            return
+        
+        # Tabs para diferentes vistas
+        tab1, tab2, tab3 = st.tabs(["👥 Lado a Lado", "🔄 Original", "✨ Procesada"])
+        
+        with tab1:
+            # Comparación lado a lado
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**📷 Original**")
+                st.image(original_img, use_column_width=True)
+                st.caption(f"Resolución: {result.get('original_size', 'N/A')}")
+            
+            with col2:
+                st.markdown("**✨ Procesada**")
+                st.image(enhanced_img, use_column_width=True)
+                st.caption(f"Resolución: {result.get('enhanced_size', 'N/A')}")
+        
+        with tab2:
+            st.markdown("**📷 Imagen Original**")
+            st.image(original_img, use_column_width=True)
+        
+        with tab3:
+            st.markdown("**✨ Imagen Procesada**")
+            st.image(enhanced_img, use_column_width=True)
+
+    def _show_full_image_download_options(self, result: Dict[str, Any]):
+        """Opciones de descarga para imagen completa"""
+        st.markdown("### 💾 Opciones de Descarga")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Descargar imagen procesada
+            if "enhanced_image" in result:
+                enhanced_bytes = self._base64_to_bytes(result["enhanced_image"])
+                if enhanced_bytes:
+                    st.download_button(
+                        label="📥 Descargar Imagen Procesada",
+                        data=enhanced_bytes,
+                        file_name=f"enhanced_x{result.get('target_scale', 'N')}_{result.get('architecture', 'unknown').lower()}.png",
+                        mime="image/png",
+                        type="primary"
+                    )
+        
+        with col2:
+            # Descargar imagen original
+            if "original_image" in result:
+                original_bytes = self._base64_to_bytes(result["original_image"])
+                if original_bytes:
+                    st.download_button(
+                        label="📥 Descargar Original",
+                        data=original_bytes,
+                        file_name="original_image.png",
+                        mime="image/png"
+                    )
+        
+        with col3:
+            # Información del resultado
+            if st.button("📊 Mostrar Detalles Técnicos"):
+                with st.expander("Detalles del Procesamiento", expanded=True):
+                    st.json({
+                        "arquitectura": result.get("architecture"),
+                        "factor_escala": result.get("target_scale"),
+                        "estrategia": result.get("strategy"),
+                        "resolucion_original": result.get("original_size"),
+                        "resolucion_final": result.get("enhanced_size"),
+                        "parches_utilizados": result.get("patch_count", 1)
+                    })
