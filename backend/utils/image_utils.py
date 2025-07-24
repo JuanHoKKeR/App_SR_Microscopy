@@ -429,6 +429,128 @@ class ImageUtils:
         }
 
 
+    @staticmethod
+    def calculate_absolute_difference(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
+        """Calcula la diferencia absoluta entre dos imágenes"""
+        try:
+            # Asegurar mismo tamaño
+            if img1.shape != img2.shape:
+                img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
+            
+            # Convertir a float para evitar overflow
+            img1_float = img1.astype(np.float32)
+            img2_float = img2.astype(np.float32)
+            
+            # Calcular diferencia absoluta
+            diff = np.abs(img1_float - img2_float)
+            
+            # Normalizar a rango [0, 255]
+            diff_normalized = (diff / np.max(diff) * 255).astype(np.uint8)
+            
+            return diff_normalized
+            
+        except Exception as e:
+            logger.error(f"Error calculando diferencia absoluta: {e}")
+            return None
+
+    @staticmethod
+    def create_comparison_visualization(original: np.ndarray, enhanced: np.ndarray, 
+                                    difference: np.ndarray = None) -> np.ndarray:
+        """Crea visualización de comparación lado a lado"""
+        try:
+            # Asegurar mismo tamaño
+            if original.shape != enhanced.shape:
+                enhanced = cv2.resize(enhanced, (original.shape[1], original.shape[0]))
+            
+            # Calcular diferencia si no se proporciona
+            if difference is None:
+                difference = ImageUtils.calculate_absolute_difference(original, enhanced)
+            
+            # Crear visualización dependiendo del número de imágenes
+            if difference is not None:
+                # Tres imágenes: original, enhanced, difference
+                comparison = np.hstack([original, enhanced, difference])
+            else:
+                # Dos imágenes: original, enhanced
+                comparison = np.hstack([original, enhanced])
+            
+            return comparison
+            
+        except Exception as e:
+            logger.error(f"Error creando visualización de comparación: {e}")
+            return None
+
+    @staticmethod
+    def generate_difference_heatmap(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
+        """Genera mapa de calor de las diferencias"""
+        try:
+            # Calcular diferencia absoluta
+            diff = ImageUtils.calculate_absolute_difference(img1, img2)
+            if diff is None:
+                return None
+            
+            # Convertir a escala de grises si es necesario
+            if len(diff.shape) == 3:
+                diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+            else:
+                diff_gray = diff
+            
+            # Aplicar mapa de color (COLORMAP_JET para heatmap)
+            heatmap = cv2.applyColorMap(diff_gray, cv2.COLORMAP_JET)
+            
+            return heatmap
+            
+        except Exception as e:
+            logger.error(f"Error generando mapa de calor: {e}")
+            return None
+
+    @staticmethod
+    def analyze_difference_statistics(difference: np.ndarray) -> Dict[str, Any]:
+        """Analiza estadísticas de la imagen de diferencia"""
+        try:
+            # Convertir a escala de grises si es necesario
+            if len(difference.shape) == 3:
+                diff_gray = cv2.cvtColor(difference, cv2.COLOR_BGR2GRAY)
+            else:
+                diff_gray = difference
+            
+            # Normalizar a [0, 1]
+            diff_normalized = diff_gray.astype(np.float32) / 255.0
+            
+            stats = {
+                "mean_difference": float(np.mean(diff_normalized)),
+                "std_difference": float(np.std(diff_normalized)),
+                "max_difference": float(np.max(diff_normalized)),
+                "min_difference": float(np.min(diff_normalized)),
+                "median_difference": float(np.median(diff_normalized)),
+                "percentile_95": float(np.percentile(diff_normalized, 95)),
+                "percentile_99": float(np.percentile(diff_normalized, 99))
+            }
+            
+            # Análisis de distribución
+            hist, bins = np.histogram(diff_normalized, bins=50, range=(0, 1))
+            stats["histogram"] = {
+                "values": hist.tolist(),
+                "bins": bins.tolist()
+            }
+            
+            # Clasificación de calidad basada en estadísticas
+            if stats["mean_difference"] < 0.05:
+                stats["quality_assessment"] = "Excelente - diferencias mínimas"
+            elif stats["mean_difference"] < 0.1:
+                stats["quality_assessment"] = "Muy buena - diferencias bajas"
+            elif stats["mean_difference"] < 0.2:
+                stats["quality_assessment"] = "Buena - diferencias moderadas"
+            elif stats["mean_difference"] < 0.3:
+                stats["quality_assessment"] = "Regular - diferencias notables"
+            else:
+                stats["quality_assessment"] = "Baja - diferencias significativas"
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error analizando estadísticas de diferencia: {e}")
+            return {}
 
 
 # Instancia global de utilidades

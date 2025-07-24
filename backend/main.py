@@ -1160,6 +1160,216 @@ async def get_kimianet_status():
     
     return status_info
 
+@app.post("/evaluate_comprehensive")
+async def evaluate_comprehensive_quality(
+    lr_file: UploadFile = File(..., description="Imagen de baja resolución"),
+    hr_file: UploadFile = File(..., description="Imagen de alta resolución"),
+    architecture: str = "ESRGAN",
+    auto_enhance: bool = True,
+    calculate_perceptual: bool = True,
+    calculate_advanced: bool = True,
+    generate_visual_analysis: bool = True
+):
+    """
+    Evaluación comprehensiva de calidad entre imagen LR, HR y versión procesada
+    """
+    try:
+        # Leer imágenes
+        lr_contents = await lr_file.read()
+        hr_contents = await hr_file.read()
+        
+        lr_image = image_utils.bytes_to_image(lr_contents)
+        hr_image = image_utils.bytes_to_image(hr_contents)
+        
+        if lr_image is None or hr_image is None:
+            raise HTTPException(status_code=400, detail="No se pudieron procesar las imágenes")
+        
+        # Información básica
+        response_data = {
+            "success": True,
+            "lr_info": image_utils.get_image_info(lr_image),
+            "hr_info": image_utils.get_image_info(hr_image),
+            "architecture": architecture,
+            "auto_enhance": auto_enhance
+        }
+        
+        # Si auto_enhance está activado, procesar la imagen LR
+        if auto_enhance:
+            logger.info("Procesando imagen LR automáticamente...")
+            
+            # Determinar factor de escala basado en tamaños
+            lr_h, lr_w = lr_image.shape[:2]
+            hr_h, hr_w = hr_image.shape[:2]
+            
+            scale_h = hr_h / lr_h
+            scale_w = hr_w / lr_w
+            target_scale = int(round(min(scale_h, scale_w)))
+            
+            if target_scale < 2:
+                target_scale = 2
+            elif target_scale > 16:
+                target_scale = 16
+            
+            logger.info(f"Factor de escala detectado: {target_scale}")
+            
+            # Procesar imagen
+            if lr_h <= 1024 and lr_w <= 1024:
+                # Usar procesamiento secuencial
+                enhancement_result = image_processor.process_sequential_upsampling(
+                    lr_image, min(lr_h, lr_w), target_scale, architecture
+                )
+            else:
+                # Usar procesamiento por parches
+                enhancement_result = image_processor.process_full_image(
+                    lr_image, target_scale, architecture
+                )
+            
+            if enhancement_result and enhancement_result["success"]:
+                enhanced_image = enhancement_result.get("final_result") or enhancement_result.get("enhanced_image")
+                response_data["enhancement_info"] = {
+                    "processed": True,
+                    "target_scale": target_scale,
+                    "method": enhancement_result.get("strategy", "sequential")
+                }
+            else:
+                # Fallback: usar interpolación bicúbica
+                enhanced_image = cv2.resize(
+                    lr_image, 
+                    (hr_w, hr_h),
+                    interpolation=cv2.INTER_CUBIC
+                )
+                response_data["enhancement_info"] = {
+                    "processed": True,
+                    "target_scale": target_scale,
+                    "method": "bicubic_fallback",
+                    "note": "Se usó interpolación bicúbica como fallback"
+                }
+        else:
+            # Usar imagen LR redimensionada como "enhanced"
+            enhanced_image = cv2.resize(
+                lr_image,
+                (hr_image.shape[1], hr_image.shape[0]),
+                interpolation=cv2.INTER_CUBIC
+            )
+            response_data["enhancement_info"] = {
+                "processed": False,
+                "method": "bicubic_resize"
+            }
+        
+        # Evaluación comprehensiva de calidad
+        logger.info("Realizando evaluación comprehensiva...")
+        quality_results = quality_evaluator.evaluate_comprehensive_quality(
+            original=hr_image,
+            enhanced=enhanced_image,
+            calculate_perceptual=calculate_perceptual,
+            calculate_advanced=calculate_advanced
+        )
+        
+        if not quality_results["evaluation_success"]:
+            raise HTTPException(status_code=500, detail=f"Error en evaluación: {quality_results.get('error_message')}")
+        
+        # Interpretación de resultados
+        interpretation = quality_evaluator.get_comprehensive_interpretation(quality_results)
+        
+        response_data["quality_evaluation"] = {
+            "metrics": quality_results,
+            "interpretation": interpretation
+        }
+        
+        # Análisis visual
+        if generate_visual_analysis:
+            logger.info("Generando análisis visual...")
+            
+            # Diferencia absoluta
+            difference_image = image_utils.calculate_absolute_difference(hr_image, enhanced_image)
+            
+            # Mapa de calor
+            heatmap = image_utils.generate_difference_heatmap(hr_image, enhanced_image)
+            
+            # Visualización de comparación
+            comparison_image = image_utils.create_comparison_visualization(
+                hr_image, enhanced_image, difference_image
+            )
+            
+            # Estadísticas de diferencia
+            if difference_image is not None:
+                diff_stats = image_utils.analyze_difference_statistics(difference_image)
+            else:
+                diff_stats = {}
+            
+            response_data["visual_analysis"] = {
+                "difference_image": image_utils.image_to_base64(difference_image) if difference_image is not None else None,
+                "heatmap": image_utils.image_to_base64(heatmap) if heatmap is not None else None,
+                "comparison_view": image_utils.image_to_base64(comparison_image) if comparison_image is not None else None,
+                "difference_statistics": diff_stats
+            }
+        
+        # Imágenes base64 para visualización
+        response_data["images"] = {
+            "lr_image": image_utils.image_to_base64(lr_image),
+            "hr_image": image_utils.image_to_base64(hr_image),
+            "enhanced_image": image_utils.image_to_base64(enhanced_image)
+        }
+        
+        logger.info("Evaluación comprehensiva completada")
+        return JSONResponse(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en evaluación comprehensiva: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@app.get("/quality_metrics_info")
+async def get_quality_metrics_info():
+    """Obtiene información sobre las métricas de calidad disponibles"""
+    return JSONResponse({
+        "basic_metrics": {
+            "psnr": {
+                "name": "Peak Signal-to-Noise Ratio",
+                "description": "Mide la relación entre señal y ruido",
+                "range": "0 a ∞ dB (más alto = mejor)",
+                "typical_range": "20-35 dB para super-resolución"
+            },
+            "ssim": {
+                "name": "Structural Similarity Index",
+                "description": "Mide similitud estructural percibida",
+                "range": "0 a 1 (más alto = mejor)",
+                "typical_range": "0.7-0.95 para buena calidad"
+            },
+            "mse": {
+                "name": "Mean Squared Error",
+                "description": "Error cuadrático medio",
+                "range": "0 a ∞ (más bajo = mejor)",
+                "typical_range": "0-1000 para buena calidad"
+            }
+        },
+        "advanced_metrics": {
+            "ms_ssim": {
+                "name": "Multi-Scale SSIM",
+                "description": "SSIM calculado en múltiples escalas",
+                "range": "0 a 1 (más alto = mejor)",
+                "typical_range": "0.8-0.95 para buena calidad"
+            },
+            "fid": {
+                "name": "Fréchet Inception Distance (Simplificado)",
+                "description": "Distancia entre distribuciones de características",
+                "range": "0 a ∞ (más bajo = mejor)",
+                "typical_range": "0-5 para buena calidad"
+            }
+        },
+        "perceptual_metrics": {
+            "perceptual_index": {
+                "name": "Índice Perceptual KimiaNet",
+                "description": "Distancia perceptual usando DenseNet121 + KimiaNet",
+                "range": "0 a ∞ (más bajo = mejor)",
+                "typical_range": "0.001-0.1 para buena calidad",
+                "specialized": "Optimizado para histopatología"
+            }
+        },
+        "kimianet_status": quality_evaluator.is_kimianet_available()
+    })
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
