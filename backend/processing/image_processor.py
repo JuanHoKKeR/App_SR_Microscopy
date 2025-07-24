@@ -297,5 +297,118 @@ class ImageProcessor:
             "memory_usage": model_loader.get_memory_usage()
         }
 
+    def process_full_image(self, image: np.ndarray, target_scale: int, 
+                        architecture: str, strategy: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        """Procesa imagen completa usando la estrategia óptima"""
+        
+        # Calcular estrategia si no se proporciona
+        if strategy is None:
+            strategy_info = image_utils.calculate_optimal_strategy(
+                image.shape[:2], target_scale, architecture
+            )
+            strategy = strategy_info["recommended_strategy"]
+        
+        if not strategy:
+            logger.error("No se pudo determinar estrategia de procesamiento")
+            return None
+        
+        try:
+            if strategy["type"] == "full_image":
+                return self._process_as_single_image(image, target_scale, architecture)
+            else:
+                return self._process_with_patches(image, target_scale, architecture, strategy)
+                
+        except Exception as e:
+            logger.error(f"Error en procesamiento de imagen completa: {e}")
+            return None
+
+    def _process_as_single_image(self, image: np.ndarray, target_scale: int, 
+                            architecture: str) -> Dict[str, Any]:
+        """Procesa imagen como una sola unidad"""
+        logger.info("Procesando imagen completa sin división")
+        
+        # Usar procesamiento secuencial existente
+        result = self.process_sequential_upsampling(
+            image, min(image.shape[:2]), target_scale, architecture
+        )
+        
+        if result and result["success"]:
+            return {
+                "success": True,
+                "strategy": "full_image",
+                "original_image": image,
+                "enhanced_image": result["final_result"],
+                "processing_info": result,
+                "patch_count": 1
+            }
+        
+        return {"success": False, "error": "Error en procesamiento secuencial"}
+
+    def _process_with_patches(self, image: np.ndarray, target_scale: int,
+                            architecture: str, strategy: Dict[str, Any]) -> Dict[str, Any]:
+        """Procesa imagen dividiendo en parches"""
+        patch_size = strategy["patch_size"]
+        overlap = strategy["overlap"]
+        
+        logger.info(f"Dividiendo imagen en parches de {patch_size}x{patch_size} con overlap {overlap}")
+        
+        # Dividir en parches
+        patches = image_utils.split_image_for_processing(image, patch_size, overlap)
+        logger.info(f"Imagen dividida en {len(patches)} parches")
+        
+        # Procesar cada parche
+        processed_patches = []
+        successful_patches = 0
+        
+        for i, patch_info in enumerate(patches):
+            logger.info(f"Procesando parche {i+1}/{len(patches)}")
+            
+            # Procesar parche con upsampling secuencial
+            patch_result = self.process_sequential_upsampling(
+                patch_info["patch"], patch_size, target_scale, architecture
+            )
+            
+            if patch_result and patch_result["success"]:
+                patch_info["enhanced_patch"] = patch_result["final_result"]
+                patch_info["processing_steps"] = patch_result["steps"]
+                successful_patches += 1
+            else:
+                logger.warning(f"Error procesando parche {i+1}")
+                # Usar interpolación bicúbica como fallback
+                fallback = cv2.resize(
+                    patch_info["patch"], 
+                    (patch_size * target_scale, patch_size * target_scale),
+                    interpolation=cv2.INTER_CUBIC
+                )
+                patch_info["enhanced_patch"] = fallback
+                patch_info["processing_steps"] = []
+            
+            processed_patches.append(patch_info)
+        
+        # Reconstruir imagen
+        logger.info("Reconstruyendo imagen desde parches procesados")
+        reconstructed = image_utils.reconstruct_image_from_patches(
+            processed_patches, image.shape[:2], target_scale, overlap
+        )
+        
+        return {
+            "success": True,
+            "strategy": "patch_based",
+            "original_image": image,
+            "enhanced_image": reconstructed,
+            "patch_count": len(patches),
+            "successful_patches": successful_patches,
+            "strategy_info": strategy,
+            "patches": processed_patches if len(patches) <= 4 else []  # Solo incluir parches si son pocos
+        }
+
+    def get_processing_strategies(self, image_shape: Tuple[int, int], 
+                                target_scale: int, architecture: str) -> Dict[str, Any]:
+        """Obtiene estrategias disponibles para procesar imagen"""
+        return image_utils.calculate_optimal_strategy(image_shape, target_scale, architecture)
+
+
+
+
 # Instancia global del procesador
 image_processor = ImageProcessor()

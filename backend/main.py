@@ -672,6 +672,112 @@ async def process_sequential_upsampling(
     except Exception as e:
         logger.error(f"Error en procesamiento secuencial: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+    
+#######################
+@app.post("/process_full_image")
+async def process_full_image(
+    file: UploadFile = File(...),
+    target_scale: int = 2,
+    architecture: str = "ESRGAN",
+    strategy_type: str = "automatic",  # "automatic", "full_image", "patch_based"
+    patch_size: int = 256,
+    overlap: int = 32,
+    evaluate_quality: bool = False
+):
+    """Procesa imagen completa con estrategia automática o manual"""
+    
+    try:
+        # Leer imagen
+        contents = await file.read()
+        image = image_utils.bytes_to_image(contents)
+        
+        if image is None:
+            raise HTTPException(status_code=400, detail="No se pudo procesar la imagen")
+        
+        # Obtener estrategias disponibles
+        strategies = image_processor.get_processing_strategies(
+            image.shape[:2], target_scale, architecture
+        )
+        
+        # Seleccionar estrategia
+        if strategy_type == "automatic":
+            strategy = strategies["recommended_strategy"]
+        elif strategy_type == "full_image":
+            strategy = {"type": "full_image"}
+        else:  # patch_based
+            strategy = {
+                "type": "patch_based",
+                "patch_size": patch_size,
+                "overlap": overlap
+            }
+        
+        if not strategy:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede procesar la imagen con los parámetros dados"
+            )
+        
+        # Procesar imagen
+        result = image_processor.process_full_image(
+            image, target_scale, architecture, strategy
+        )
+        
+        if not result or not result["success"]:
+            raise HTTPException(status_code=500, detail="Error procesando la imagen")
+        
+        # Convertir imágenes a base64
+        response_data = {
+            "success": True,
+            "strategy": result["strategy"],
+            "original_size": f"{image.shape[1]}x{image.shape[0]}",
+            "enhanced_size": f"{result['enhanced_image'].shape[1]}x{result['enhanced_image'].shape[0]}",
+            "original_image": image_utils.image_to_base64(result["original_image"]),
+            "enhanced_image": image_utils.image_to_base64(result["enhanced_image"]),
+            "patch_count": result.get("patch_count", 1),
+            "architecture": architecture,
+            "target_scale": target_scale,
+            "quality_metrics": None
+        }
+        
+        # Evaluación de calidad opcional
+        if evaluate_quality:
+            quality_results = quality_evaluator.evaluate_image_quality(
+                original=result["original_image"],
+                enhanced=result["enhanced_image"],
+                calculate_perceptual=True
+            )
+            
+            if quality_results["evaluation_success"]:
+                interpretation = quality_evaluator.get_quality_interpretation(quality_results)
+                response_data["quality_metrics"] = {
+                    "psnr": quality_results["psnr"],
+                    "ssim": quality_results["ssim"],
+                    "perceptual_index": quality_results["perceptual_index"],
+                    "interpretation": interpretation
+                }
+        
+        return JSONResponse(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en procesamiento de imagen completa: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@app.get("/processing_strategies/{width}/{height}/{target_scale}/{architecture}")
+async def get_processing_strategies(width: int, height: int, target_scale: int, architecture: str):
+    """Obtiene estrategias de procesamiento para imagen dada"""
+    try:
+        strategies = image_processor.get_processing_strategies(
+            (height, width), target_scale, architecture
+        )
+        return JSONResponse(strategies)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo estrategias: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+#######################
 
 @app.get("/upsampling_path/{architecture}/{start_size}/{target_scale}")
 async def get_upsampling_path(architecture: str, start_size: int, target_scale: int):

@@ -8,7 +8,7 @@ import cv2
 import base64
 import io
 from PIL import Image
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional, Union, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -284,6 +284,152 @@ class ImageUtils:
             reconstructed = reconstructed / weight_map
         
         return reconstructed.astype(np.uint8)
+
+    @staticmethod
+    def split_image_for_processing(image: np.ndarray, patch_size: int, 
+                                overlap: int = 32) -> list:
+        """Divide imagen en parches para procesamiento con overlap"""
+        patches = []
+        h, w = image.shape[:2]
+        
+        stride = patch_size - overlap
+        
+        for y in range(0, h, stride):
+            for x in range(0, w, stride):
+                # Ajustar límites para no exceder imagen
+                y_end = min(y + patch_size, h)
+                x_end = min(x + patch_size, w)
+                y_start = max(0, y_end - patch_size)
+                x_start = max(0, x_end - patch_size)
+                
+                patch = image[y_start:y_end, x_start:x_end]
+                
+                patches.append({
+                    'patch': patch,
+                    'original_coords': (x_start, y_start),
+                    'target_coords': (x_start * 2, y_start * 2),  # Asumiendo x2 scale
+                    'size': (patch_size, patch_size)
+                })
+        
+        return patches
+
+    @staticmethod
+    def reconstruct_image_from_patches(patches: list, original_size: Tuple[int, int],
+                                    scale_factor: int, overlap: int = 32) -> np.ndarray:
+        """Reconstruye imagen desde parches procesados"""
+        h_orig, w_orig = original_size
+        h_new, w_new = h_orig * scale_factor, w_orig * scale_factor
+        
+        # Determinar número de canales
+        sample_patch = patches[0]['enhanced_patch']
+        channels = sample_patch.shape[2] if len(sample_patch.shape) == 3 else 1
+        
+        if channels > 1:
+            reconstructed = np.zeros((h_new, w_new, channels), dtype=np.float32)
+            weight_map = np.zeros((h_new, w_new), dtype=np.float32)
+        else:
+            reconstructed = np.zeros((h_new, w_new), dtype=np.float32)
+            weight_map = np.zeros((h_new, w_new), dtype=np.float32)
+        
+        for patch_info in patches:
+            patch = patch_info['enhanced_patch'].astype(np.float32)
+            x_target, y_target = patch_info['target_coords']
+            patch_h, patch_w = patch.shape[:2]
+            
+            # Crear máscara de peso con fade en los bordes para suavizar
+            weight_patch = np.ones((patch_h, patch_w), dtype=np.float32)
+            
+            if overlap > 0:
+                # Aplicar fade en los bordes
+                fade_size = min(overlap // 2, patch_h // 4, patch_w // 4)
+                for i in range(fade_size):
+                    weight_val = (i + 1) / fade_size
+                    weight_patch[i, :] *= weight_val  # Top
+                    weight_patch[-i-1, :] *= weight_val  # Bottom
+                    weight_patch[:, i] *= weight_val  # Left
+                    weight_patch[:, -i-1] *= weight_val  # Right
+            
+            # Agregar patch ponderado
+            y_end = min(y_target + patch_h, h_new)
+            x_end = min(x_target + patch_w, w_new)
+            
+            if channels > 1:
+                for c in range(channels):
+                    reconstructed[y_target:y_end, x_target:x_end, c] += \
+                        patch[:y_end-y_target, :x_end-x_target, c] * weight_patch[:y_end-y_target, :x_end-x_target]
+            else:
+                reconstructed[y_target:y_end, x_target:x_end] += \
+                    patch[:y_end-y_target, :x_end-x_target] * weight_patch[:y_end-y_target, :x_end-x_target]
+            
+            weight_map[y_target:y_end, x_target:x_end] += weight_patch[:y_end-y_target, :x_end-x_target]
+        
+        # Normalizar por pesos
+        weight_map[weight_map == 0] = 1
+        if channels > 1:
+            for c in range(channels):
+                reconstructed[:, :, c] /= weight_map
+        else:
+            reconstructed /= weight_map
+        
+        return np.clip(reconstructed, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def calculate_optimal_strategy(input_size: Tuple[int, int], target_scale: int,
+                                architecture: str) -> Dict[str, Any]:
+        """Calcula la estrategia óptima para procesar imagen completa"""
+        h, w = input_size
+        target_h, target_w = h * target_scale, w * target_scale
+        
+        # Tamaños de patch disponibles para la arquitectura
+        available_sizes = [64, 128, 256, 512]
+        
+        strategies = []
+        
+        # Estrategia 1: Imagen completa (si es posible)
+        if h <= 1024 and w <= 1024:
+            strategies.append({
+                "type": "full_image",
+                "description": f"Procesar imagen completa ({h}x{w})",
+                "patch_count": 1,
+                "overlap": 0,
+                "memory_efficient": True
+            })
+        
+        # Estrategia 2: División en parches
+        for patch_size in available_sizes:
+            if patch_size <= min(h, w):
+                # Calcular número de parches necesarios
+                overlap = min(64, patch_size // 4)
+                stride = patch_size - overlap
+                
+                patches_h = max(1, (h - overlap + stride - 1) // stride)
+                patches_w = max(1, (w - overlap + stride - 1) // stride)
+                total_patches = patches_h * patches_w
+                
+                strategies.append({
+                    "type": "patch_based",
+                    "patch_size": patch_size,
+                    "overlap": overlap,
+                    "patches_h": patches_h,
+                    "patches_w": patches_w,
+                    "patch_count": total_patches,
+                    "description": f"Dividir en {total_patches} parches de {patch_size}x{patch_size}",
+                    "memory_efficient": total_patches <= 16
+                })
+        
+        # Ordenar por eficiencia (menos parches = mejor)
+        strategies.sort(key=lambda x: x["patch_count"])
+        
+        return {
+            "input_size": input_size,
+            "target_scale": target_scale,
+            "target_size": (target_h, target_w),
+            "recommended_strategy": strategies[0] if strategies else None,
+            "all_strategies": strategies
+        }
+
+
+
 
 # Instancia global de utilidades
 image_utils = ImageUtils()
