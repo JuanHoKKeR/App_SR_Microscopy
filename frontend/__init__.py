@@ -4,4 +4,4 @@ Interfaz web desarrollada con Streamlit
 """
 
 __version__ = "1.0.0"
-__author__ = "Tu Nombre"
+__author__ = "Juan David Cruz Useche"
