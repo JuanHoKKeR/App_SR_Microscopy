@@ -34,7 +34,7 @@ App_SR_Microscopy/
 │   ├── components/           # Componentes UI personalizados
 │   ├── assets/               # Recursos estáticos
 └── shared/                   # Resources compartidos
-    ├── models/               # Modelos entrenados (.pth)
+    ├── models/               # Modelos entrenados (.pth .pt)
     ├── sample_images/        # Imágenes de ejemplo
     └── config/               # Configuraciones
 ```
@@ -45,7 +45,7 @@ App_SR_Microscopy/
 - Python 3.9+
 - GPU NVIDIA (recomendado para inferencia rápida)
 - 8GB+ RAM
-- Modelos entrenados (.pth files)
+- Modelos entrenados (.pth and .pt files)
 
 ### **1. Clonar el Repositorio**
 ```bash
@@ -94,8 +94,8 @@ mkdir -p ../shared/models
 # Ejemplo de estructura:
 # shared/models/
 # ├── esrgan_512to1024.pth
-# ├── swinir_512to1024.pth
-# └── edsr_512to1024.pth
+# ├── swinir_512to1024.pt
+# └── edsr_512to1024.pt
 ```
 
 ### **3. Configurar Frontend (Streamlit)**
